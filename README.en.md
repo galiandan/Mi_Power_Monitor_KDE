@@ -14,7 +14,11 @@ cd Mi_Power_Monitor_KDE
 
 The installer builds the backend from the bundled Go source, installs it at `~/.local/bin/xiaomi-power`, installs the Plasma widget, and guides QR setup on first install. An existing `~/.config/xiaomi-power/config.json` is reused. After installation, add **Mi Power Monitor** from Plasma's widget list.
 
-The widget runs `xiaomi-power --json` every two seconds and displays the reading and status. The backend also supports continuous polling on its own:
+The panel shows rounded whole-watt readings for total, CPU, and GPU power. Total power comes from the Xiaomi Smart Plug 3; CPU power is calculated from Linux RAPL energy counters over a one-second sample; NVIDIA GPU power comes from `nvidia-smi`. Missing hardware, drivers, or RAPL read access show `--W`. Hover uses Plasma's native tooltip, left click cycles display modes, and the standard right-click menu opens settings.
+
+Full mode shows `83W · CPU 21W · GPU 37W`; Compact omits CPU/GPU labels; Total only keeps the whole-device reading. Choose the mode and toggle CPU/GPU in the widget settings. The frontend requests readings asynchronously every second. The backend also supports continuous polling on its own:
+
+The widget reads total power with `xiaomi-power --json`. The contract returns `model`, `power`, `unit`, and `available`; unavailable readings use `power: null` and may include `error`. Plasma's executable data engine delivers stdout when a command exits, so the widget polls the one-shot command once per second. Use `--watch` for direct backend use or clients that consume a continuous stream. CPU/GPU readings come from this repository's `backend/read-sensors.sh`, outside the upstream plug backend API.
 
 ```bash
 xiaomi-power --watch --json
@@ -38,6 +42,7 @@ This keeps the device config and token. To remove them too:
 - `backend/`: Go reader, Python token setup helper, dependency manifests, and example config.
 - `install.sh` / `uninstall.sh`: build, install, and remove the complete project.
 - `.github/workflows/sync-upstream-backend.yml`: checks the original backend daily and creates an auto-merge sync PR when source or dependency manifests change.
+- `backend/read-sensors.sh`: reads RAPL CPU and NVIDIA GPU power.
 
 Go dependencies are pinned by `backend/go.mod` and `backend/go.sum`; QR setup dependencies are pinned by `backend/requirements.txt`. An internet connection is needed for the first build and QR setup.
 

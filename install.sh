@@ -9,6 +9,7 @@ backend_dir="${app_dir}/backend"
 config_path="${config_home}/xiaomi-power/config.json"
 bin_dir="${HOME}/.local/bin"
 command_path="${bin_dir}/xiaomi-power"
+sensor_command_path="${bin_dir}/mi-power-monitor-sensors"
 plasmoid_id="com.github.galiandan.mipowermonitor"
 
 for command in go kpackagetool6; do
@@ -34,7 +35,7 @@ cp -R "${script_dir}/backend/." "$backend_dir/"
 printf 'Building xiaomi-power from the bundled backend source...\n'
 (
     cd "$backend_dir"
-    CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o xiaomi-power ./cmd/xiaomi-power
+    CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags='-s -w' -o xiaomi-power ./cmd/xiaomi-power
 )
 
 if [[ ! -s "$config_path" ]]; then
@@ -66,6 +67,12 @@ if [[ -e "$command_path" && ! -L "$command_path" ]]; then
     exit 1
 fi
 ln -sfn "${backend_dir}/xiaomi-power" "$command_path"
+
+if [[ -e "$sensor_command_path" && ! -L "$sensor_command_path" ]]; then
+    printf 'Cannot replace existing non-symlink: %s\n' "$sensor_command_path" >&2
+    exit 1
+fi
+ln -sfn "${backend_dir}/read-sensors.sh" "$sensor_command_path"
 
 if kpackagetool6 --type Plasma/Applet --list 2>/dev/null | grep -Fq "$plasmoid_id"; then
     kpackagetool6 --type Plasma/Applet --upgrade "${script_dir}/package"

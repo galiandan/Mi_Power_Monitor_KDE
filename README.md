@@ -14,7 +14,11 @@ cd Mi_Power_Monitor_KDE
 
 安装脚本会从仓库内的 Go 源码构建后端，将它放在 `~/.local/bin/xiaomi-power`，安装 Plasma 小组件，并在首次安装时引导扫码配置。若已有 `~/.config/xiaomi-power/config.json`，会直接复用。完成后，在 Plasma 小组件列表中添加 **Mi Power Monitor**。
 
-小组件每两秒调用 `xiaomi-power --json`，以 JSON 读取功率并显示状态。后端单独运行时也支持长轮询：
+面板显示整机、CPU 和 GPU 的整数瓦数，读取中或不可用时使用 `--W`。整机功耗来自米家智能插座 3；CPU 功耗读取 Linux RAPL 能量计数器并按 1 秒采样间隔计算；NVIDIA GPU 功耗由 `nvidia-smi` 提供。没有对应硬件、驱动或 RAPL 读取权限时，相应项显示 `--W`。鼠标悬停显示 Plasma 原生提示，左键循环切换显示模式，右键可打开设置。
+
+默认 Full 模式显示 `⚡ 83W · CPU 21W · GPU 37W`；Compact 模式省去 CPU/GPU 标签；Total only 只显示整机功耗。可在组件设置里选择模式并隐藏 CPU 或 GPU。前端每秒异步读取数据，后端单独运行时也支持长轮询：
+
+组件通过 `xiaomi-power --json` 读取整机功耗。接口返回 `model`、`power`、`unit`、`available`，不可用时 `power` 为 `null`，并可附带 `error`。Plasma 的 executable 数据引擎在命令结束后才交付 stdout，所以组件按一秒间隔调用单次读取；`--watch` 则留给直接运行后端或其他能消费持续输出的客户端。CPU/GPU 使用本仓库的 `backend/read-sensors.sh`，不属于上游插座后端接口。
 
 ```bash
 xiaomi-power --watch --json
@@ -38,6 +42,7 @@ xiaomi-power --watch --json
 - `backend/`：独立后端的 Go 源码、Python token 配置工具、依赖清单和示例配置。
 - `install.sh` / `uninstall.sh`：构建、安装及卸载整套项目。
 - `.github/workflows/sync-upstream-backend.yml`：每天检查原后端仓库；发现代码或依赖清单更新时创建同步 PR 并启用自动合并。
+- `backend/read-sensors.sh`：以低开销读取 RAPL CPU 和 NVIDIA GPU 功耗。
 
 Go 通信依赖由 `backend/go.mod` 和 `backend/go.sum` 固定；扫码配置依赖由 `backend/requirements.txt` 固定。首次构建或首次扫码配置需要联网下载依赖。
 
