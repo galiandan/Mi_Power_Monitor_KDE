@@ -1,0 +1,7 @@
+{
+  "model": "cuco.plug.v3",
+  "ip": "192.0.2.10",
+  "token": "REPLACE_WITH_DEVICE_TOKEN",
+  "did": "REPLACE_WITH_DEVICE_ID",
+  "timeout": 5
+}

@@ -1,0 +1,6 @@
+# Pinned because this program uses python-miio's generic MIoT MiotDevice API.
+python-miio @ git+https://github.com/rytilahti/python-miio.git@9a00e0888ef85f8d8d84888cabd9e46d1b0a18df
+
+# Used by the optional QR token setup helper.
+colorama>=0.4.6,<1
+Pillow>=10,<13

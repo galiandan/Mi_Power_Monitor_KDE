@@ -1,2 +1,11 @@
 build/
 *.kdev4
+.venv/
+__pycache__/
+*.py[cod]
+*.ab
+*.sqlite
+*.sqlite3
+*.db
+/backend/.venv/
+/backend/xiaomi-power
