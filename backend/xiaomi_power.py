@@ -278,11 +278,11 @@ def setup_from_local_export(path: Path, source: Path) -> int:
             ))
             with AndroidBackup(str(source), stream=False) as backup:
                 archive = backup.read_data(backup_password or None)
-                database = archive.extractfile("apps/com.xiaomi.smarthome/db/miio2.db")
-                if database is None:
+                backup_database = archive.extractfile("apps/com.xiaomi.smarthome/db/miio2.db")
+                if backup_database is None:
                     raise ValueError("Mi Home database is missing from the Android backup")
-                with tempfile.NamedTemporaryFile(suffix=".sqlite") as db_file:
-                    db_file.write(database.read())
+                with backup_database, tempfile.NamedTemporaryFile(suffix=".sqlite") as db_file:
+                    shutil.copyfileobj(backup_database, db_file, length=1024 * 1024)
                     db_file.flush()
                     devices = list(BackupDatabaseReader().read_tokens(db_file.name))
         else:

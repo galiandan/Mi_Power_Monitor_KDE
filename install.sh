@@ -73,7 +73,7 @@ if [[ ! -s "$config_path" ]]; then
     if [[ ! -x "${backend_dir}/.venv/bin/python" ]]; then
         python3 -m venv "${backend_dir}/.venv"
     fi
-    "${backend_dir}/.venv/bin/python" -m pip install --quiet -r "${backend_dir}/requirements.txt"
+    "${backend_dir}/.venv/bin/python" -m pip install --quiet --no-cache-dir -r "${backend_dir}/requirements.txt"
     say '首次配置：推荐使用米家二维码扫码登录来绑定插座。' 'First-time setup: QR sign-in is recommended to connect your plug.'
     if [[ -t 0 ]]; then
         "${backend_dir}/.venv/bin/python" "${backend_dir}/xiaomi_power.py" --setup-cloud-qr

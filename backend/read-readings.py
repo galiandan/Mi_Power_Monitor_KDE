@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -12,18 +14,30 @@ from typing import Any
 
 def read_json(command: list[str], timeout: float = 7.0) -> dict[str, Any]:
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
-            check=False,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
-            timeout=timeout,
+            start_new_session=True,
         )
-        if not result.stdout.strip():
+        try:
+            stdout, _ = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # The sensor shell can have children such as nvidia-smi and awk.
+            # Kill the whole process group so a hung driver query cannot leave
+            # one orphan behind on every Plasma polling cycle.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.communicate()
             return {}
-        value = json.loads(result.stdout)
+        if not stdout or not stdout.strip():
+            return {}
+        value = json.loads(stdout)
         return value if isinstance(value, dict) else {}
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError):
         return {}
 
 

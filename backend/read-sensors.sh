@@ -41,11 +41,15 @@ fi
 
 gpu_power=""
 if command -v nvidia-smi >/dev/null 2>&1; then
-    gpu_power="$(nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits 2>/dev/null \
-        | awk '
-            /^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$/ { total += $1; count++ }
-            END { if (count > 0) printf "%.1f", total }
-        ' || true)"
+    if command -v timeout >/dev/null 2>&1; then
+        gpu_readings="$(timeout --signal=KILL 2s nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits 2>/dev/null || true)"
+    else
+        gpu_readings="$(nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits 2>/dev/null || true)"
+    fi
+    gpu_power="$(awk '
+        /^[[:space:]]*[0-9]+([.][0-9]+)?[[:space:]]*$/ { total += $1; count++ }
+        END { if (count > 0) printf "%.1f", total }
+    ' <<< "$gpu_readings")"
 fi
 
 [[ "$cpu_power" =~ ^[0-9]+([.][0-9]+)?$ ]] || cpu_power=null
