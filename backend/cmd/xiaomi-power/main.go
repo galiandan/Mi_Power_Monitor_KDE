@@ -153,6 +153,9 @@ func run() int {
 	if err != nil {
 		return startupFailure(*jsonMode, "cannot load config", err.Error())
 	}
+	if cfg.Timeout > 60 {
+		return startupFailure(*jsonMode, "invalid config timeout", "config timeout must not exceed 60 seconds")
+	}
 	// Ensure credentials stay private, including configs copied from the Python setup.
 	if err := os.Chmod(path, 0o600); err != nil {
 		return startupFailure(*jsonMode, "cannot secure config permissions", "cannot secure config file permissions")

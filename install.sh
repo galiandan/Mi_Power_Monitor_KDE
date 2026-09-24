@@ -30,6 +30,13 @@ sensor_command_path="${bin_dir}/mi-power-monitor-sensors"
 readings_command_path="${bin_dir}/mi-power-monitor-readings"
 plasmoid_id="com.github.galiandan.mipowermonitor"
 
+for managed_path in "$command_path" "$sensor_command_path" "$readings_command_path"; do
+    if [[ -e "$managed_path" && ! -L "$managed_path" ]]; then
+        say '目标位置已有非符号链接文件，无法覆盖：%s' 'Cannot replace existing non-symlink: %s' "$managed_path" >&2
+        exit 1
+    fi
+done
+
 for command in go python3 kpackagetool6; do
     if ! command -v "$command" >/dev/null 2>&1; then
         say '缺少必要命令：%s' 'Missing required command: %s' "$command" >&2
@@ -81,7 +88,7 @@ else
 fi
 
 shopt -s nullglob
-rapl_energy_files=(/sys/devices/virtual/powercap/intel-rapl/intel-rapl:*/energy_uj)
+rapl_energy_files=(/sys/class/powercap/*rapl:*/energy_uj)
 if (( ${#rapl_energy_files[@]} > 0 )); then
     rapl_readable=false
     for energy_file in "${rapl_energy_files[@]}"; do
@@ -98,22 +105,10 @@ if (( ${#rapl_energy_files[@]} > 0 )); then
     fi
 fi
 
-if [[ -e "$command_path" && ! -L "$command_path" ]]; then
-    say '目标位置已有非符号链接文件，无法覆盖：%s' 'Cannot replace existing non-symlink: %s' "$command_path" >&2
-    exit 1
-fi
 ln -sfn "${backend_dir}/xiaomi-power" "$command_path"
 
-if [[ -e "$sensor_command_path" && ! -L "$sensor_command_path" ]]; then
-    say '目标位置已有非符号链接文件，无法覆盖：%s' 'Cannot replace existing non-symlink: %s' "$sensor_command_path" >&2
-    exit 1
-fi
 ln -sfn "${backend_dir}/read-sensors.sh" "$sensor_command_path"
 
-if [[ -e "$readings_command_path" && ! -L "$readings_command_path" ]]; then
-    say '目标位置已有非符号链接文件，无法覆盖：%s' 'Cannot replace existing non-symlink: %s' "$readings_command_path" >&2
-    exit 1
-fi
 ln -sfn "${backend_dir}/read-readings.py" "$readings_command_path"
 
 if kpackagetool6 --type Plasma/Applet --packageroot "$plasmoid_root" --list 2>/dev/null | grep -Fq "$plasmoid_id"; then

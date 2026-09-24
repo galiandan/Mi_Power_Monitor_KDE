@@ -2,6 +2,9 @@
 set -u
 
 cpu_power=""
+declare -a rapl_energy_files=()
+declare -a rapl_range_files=()
+declare -a rapl_before_values=()
 for rapl_dir in /sys/class/powercap/*rapl:*; do
     [[ -d "$rapl_dir" ]] || continue
     [[ "$(basename "$rapl_dir")" =~ rapl:[0-9]+$ ]] || continue
@@ -13,18 +16,28 @@ for rapl_dir in /sys/class/powercap/*rapl:*; do
     read -r max_range < "$range_file" || continue
     [[ "$before" =~ ^[0-9]+$ && "$max_range" =~ ^[0-9]+$ && "$max_range" -gt 0 ]] || continue
 
-    sleep 1
-    read -r after < "$energy_file" || break
-    [[ "$after" =~ ^[0-9]+$ ]] || break
-
-    if (( after >= before )); then
-        delta=$((after - before))
-    else
-        delta=$((max_range - before + after))
-    fi
-    cpu_power="$(awk -v delta="$delta" 'BEGIN { if (delta >= 0) printf "%.1f", delta / 1000000 }')"
-    break
+    rapl_energy_files+=("$energy_file")
+    rapl_range_files+=("$max_range")
+    rapl_before_values+=("$before")
 done
+
+if (( ${#rapl_energy_files[@]} > 0 )); then
+    sleep 1
+    total_delta=0
+    for index in "${!rapl_energy_files[@]}"; do
+        read -r after < "${rapl_energy_files[$index]}" || continue
+        [[ "$after" =~ ^[0-9]+$ ]] || continue
+        before="${rapl_before_values[$index]}"
+        max_range="${rapl_range_files[$index]}"
+        if (( after >= before )); then
+            delta=$((after - before))
+        else
+            delta=$((max_range - before + after))
+        fi
+        (( delta >= 0 )) && total_delta=$((total_delta + delta))
+    done
+    cpu_power="$(awk -v delta="$total_delta" 'BEGIN { if (delta >= 0) printf "%.1f", delta / 1000000 }')"
+fi
 
 gpu_power=""
 if command -v nvidia-smi >/dev/null 2>&1; then

@@ -91,7 +91,7 @@ except ImportError:
 
 
 def config_path() -> Path:
-    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
     return config_home / "xiaomi-power" / "config.json"
 
 
@@ -213,14 +213,6 @@ def setup_from_cloud(path: Path) -> int:
              "python-miio cloud support is unavailable.", file=sys.stderr)
         return 1
 
-    preferred_ip = ""
-    if path.exists():
-        try:
-            saved = json.loads(path.read_text(encoding="utf-8"))
-            preferred_ip = str(saved.get("ip", "")) if isinstance(saved, dict) else ""
-        except (OSError, json.JSONDecodeError):
-            pass
-
     try:
         username = _ask("小米账号：", "Xiaomi account username: ").strip()
         password = getpass.getpass(
@@ -250,8 +242,6 @@ def setup_from_cloud(path: Path) -> int:
         return 1
 
     matches = [d for d in devices.values() if d.model == MODEL and not d.is_child]
-    if preferred_ip:
-        matches = [d for d in matches if d.ip == preferred_ip]
     dev = _select_device(matches, lambda device: str(device.ip or ""))
     if dev is None:
         return 1
@@ -278,14 +268,6 @@ def setup_from_local_export(path: Path, source: Path) -> int:
     try:
         from miio.extract_tokens import BackupDatabaseReader
 
-        preferred_ip = ""
-        if path.exists():
-            try:
-                saved = json.loads(path.read_text(encoding="utf-8"))
-                preferred_ip = str(saved.get("ip", "")) if isinstance(saved, dict) else ""
-            except (OSError, json.JSONDecodeError):
-                pass
-
         if source.suffix.lower() == ".ab":
             from android_backup import AndroidBackup
 
@@ -306,7 +288,7 @@ def setup_from_local_export(path: Path, source: Path) -> int:
         else:
             devices = list(BackupDatabaseReader().read_tokens(str(source)))
 
-        matches = [d for d in devices if d.model == MODEL and (not preferred_ip or d.ip == preferred_ip)]
+        matches = [d for d in devices if d.model == MODEL]
         dev = _select_device(matches, lambda device: str(device.ip or ""))
         if dev is None:
             return 1
@@ -487,9 +469,11 @@ def setup_from_qr_extractor(path: Path) -> int:
                 for section in home.get("homes", [])
                 for device in section.get("devices", [])
                 if device.get("model") == MODEL
-                and (not preferred_ip or device.get("localip") == preferred_ip)
             ]
-            unique = {str(d.get("did")): d for d in devices}
+            unique = {
+                str(d.get("did") or d.get("localip") or f"device-{index}"): d
+                for index, d in enumerate(devices)
+            }
             matches = list(unique.values())
             device = _select_device(matches, lambda item: str(item.get("localip") or ""))
             if device is None:

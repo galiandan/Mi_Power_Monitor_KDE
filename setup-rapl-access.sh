@@ -21,7 +21,6 @@ script_name="${0##*/}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 rule_path="/etc/tmpfiles.d/mi-power-monitor-rapl.conf"
 state_path="/var/lib/mi-power-monitor/rapl-permissions.before"
-rapl_path="/sys/devices/virtual/powercap/intel-rapl"
 action="install"
 
 if [[ "${1:-}" == "--remove" ]]; then
@@ -57,7 +56,7 @@ fi
 
 if [[ "$action" == "remove" ]]; then
     shopt -s nullglob
-    energy_files=("${rapl_path}"/intel-rapl:*/energy_uj)
+    energy_files=(/sys/class/powercap/*rapl:*/energy_uj)
     if [[ -s "$state_path" ]]; then
         while read -r mode uid gid path; do
             [[ -e "$path" ]] || continue
@@ -84,9 +83,9 @@ if [[ "$action" == "remove" ]]; then
 fi
 
 shopt -s nullglob
-energy_files=("${rapl_path}"/intel-rapl:*/energy_uj)
+energy_files=(/sys/class/powercap/*rapl:*/energy_uj)
 if (( ${#energy_files[@]} == 0 )); then
-    say '在 %s 下没有找到 Intel/AMD RAPL 能量计数器。' 'No Intel/AMD RAPL package energy counters were found under %s.' "$rapl_path" >&2
+    say '在 /sys/class/powercap 下没有找到 RAPL 能量计数器。' 'No RAPL energy counters were found under /sys/class/powercap.' >&2
     exit 1
 fi
 
@@ -110,7 +109,15 @@ fi
 install -d -m 0755 /etc/tmpfiles.d
 tmp_rule="$(mktemp)"
 trap 'rm -f -- "$tmp_rule"' EXIT
-printf 'z %s/intel-rapl:*/energy_uj 0400 %s %s - -\n' "$rapl_path" "$target_user" "$target_user" > "$tmp_rule"
+for energy_file in "${energy_files[@]}"; do
+    real_energy_file="$(readlink -f -- "$energy_file")"
+    [[ "$real_energy_file" == /sys/* ]] || continue
+    printf 'z %s 0400 %s %s - -\n' "$real_energy_file" "$target_user" "$target_user" >> "$tmp_rule"
+done
+if [[ ! -s "$tmp_rule" ]]; then
+    say '无法解析 RAPL 计数器的实际 sysfs 路径。' 'Could not resolve the RAPL counters to their sysfs paths.' >&2
+    exit 1
+fi
 install -m 0644 "$tmp_rule" "$rule_path"
 systemd-tmpfiles --create "$rule_path"
 
