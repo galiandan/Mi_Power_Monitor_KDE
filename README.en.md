@@ -20,7 +20,7 @@ cd Mi_Power_Monitor_KDE
 ./install.sh
 ```
 
-The installer builds the backend from the bundled Go source, installs it at `~/.local/bin/xiaomi-power`, and uses `kpackagetool6` to install the widget to `${XDG_DATA_HOME:-~/.local/share}/plasma/plasmoids/com.github.galiandan.mipowermonitor/`. First-time setup guides QR login. If the Xiaomi account has multiple plugs, QR setup lists them for selection by number without printing tokens. An existing `~/.config/xiaomi-power/config.json` is reused. After installation, add **Mi Power Monitor** from Plasma's widget list.
+The installer builds the backend from the bundled Go source, installs it at `~/.local/bin/xiaomi-power`, and uses `kpackagetool6` to install the widget to `${XDG_DATA_HOME:-~/.local/share}/plasma/plasmoids/com.github.galiandan.mipowermonitor/`. First-time setup recommends Xiaomi QR sign-in and tries to open the local login page in the default browser; it also prints the URL in case you need to open it manually. Scan the QR code in the terminal with Mi Home on your phone and approve the sign-in. If the Xiaomi account has multiple plugs, QR setup lists them for selection by number without printing tokens. An existing `~/.config/xiaomi-power/config.json` is reused. After installation, add **Mi Power Monitor** from Plasma's widget list.
 
 The panel shows rounded whole-watt readings for total, CPU, and GPU power. Total power comes from the Xiaomi Smart Plug 3; CPU power is calculated from Linux RAPL energy counters over a one-second sample; NVIDIA GPU power comes from `nvidia-smi`. Missing hardware, drivers, or RAPL read access show `--W`. Hover uses Plasma's native tooltip, left click cycles display modes, and the standard right-click menu opens settings.
 

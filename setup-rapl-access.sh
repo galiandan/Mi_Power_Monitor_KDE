@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+supports_chinese() {
+    local charmap
+    charmap="$(locale charmap 2>/dev/null || true)"
+    [[ "$charmap" == UTF-8 || "$charmap" == UTF8 ]]
+}
+
+say() {
+    local chinese="$1" english="$2"
+    shift 2
+    if supports_chinese; then
+        printf "$chinese\n" "$@"
+    else
+        printf "$english\n" "$@"
+    fi
+}
+
 script_name="${0##*/}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 rule_path="/etc/tmpfiles.d/mi-power-monitor-rapl.conf"
@@ -21,8 +37,8 @@ if [[ -z "$target_user" ]]; then
 fi
 
 if [[ "$target_user" == "root" || -z "$target_user" ]] || ! getent passwd "$target_user" >/dev/null; then
-    printf 'Usage: %s [--remove] [desktop-user]\n' "$script_name" >&2
-    printf 'Run this from the desktop account, or pass that account name when using sudo.\n' >&2
+	say '用法：%s [--remove] [桌面用户名称]' 'Usage: %s [--remove] [desktop-user]' "$script_name" >&2
+	say '请从桌面用户账户运行；使用 sudo 时，请传入该桌面账户名称。' 'Run this from the desktop account, or pass that account name when using sudo.' >&2
     exit 2
 fi
 
@@ -34,7 +50,7 @@ if (( EUID != 0 )); then
     elif command -v sudo >/dev/null 2>&1; then
         exec sudo -- "${script_dir}/${script_name}" "$mode_arg" "$target_user"
     else
-        printf 'Administrator access is required. Run: sudo %s %s %s\n' "${script_dir}/${script_name}" "$action" "$target_user" >&2
+		say '需要管理员权限。请运行：sudo %s %s %s' 'Administrator access is required. Run: sudo %s %s %s' "${script_dir}/${script_name}" "$action" "$target_user" >&2
         exit 1
     fi
 fi
@@ -63,14 +79,14 @@ if [[ "$action" == "remove" ]]; then
         rm -- "$state_path"
     fi
     rmdir /var/lib/mi-power-monitor 2>/dev/null || true
-    printf 'Removed the persistent RAPL permission rule and restored original access.\n'
+    say '已移除持久化 RAPL 权限规则，并恢复原始访问权限。' 'Removed the persistent RAPL permission rule and restored original access.'
     exit 0
 fi
 
 shopt -s nullglob
 energy_files=("${rapl_path}"/intel-rapl:*/energy_uj)
 if (( ${#energy_files[@]} == 0 )); then
-    printf 'No Intel/AMD RAPL package energy counters were found under %s.\n' "$rapl_path" >&2
+    say '在 %s 下没有找到 Intel/AMD RAPL 能量计数器。' 'No Intel/AMD RAPL package energy counters were found under %s.' "$rapl_path" >&2
     exit 1
 fi
 
@@ -98,8 +114,8 @@ printf 'z %s/intel-rapl:*/energy_uj 0400 %s %s - -\n' "$rapl_path" "$target_user
 install -m 0644 "$tmp_rule" "$rule_path"
 systemd-tmpfiles --create "$rule_path"
 
-printf 'Granted RAPL energy-counter read access to %s.\n' "$target_user"
-printf 'Persistent rule: %s\n' "$rule_path"
+say '已允许用户 %s 读取 RAPL 能量计数器。' 'Granted RAPL energy-counter read access to %s.' "$target_user"
+say '持久化规则：%s' 'Persistent rule: %s' "$rule_path"
 for energy_file in "${energy_files[@]}"; do
     stat -c '%A %U:%G %n' "$energy_file"
 done
