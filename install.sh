@@ -27,9 +27,10 @@ config_path="${config_home}/xiaomi-power/config.json"
 bin_dir="${HOME}/.local/bin"
 command_path="${bin_dir}/xiaomi-power"
 sensor_command_path="${bin_dir}/mi-power-monitor-sensors"
+readings_command_path="${bin_dir}/mi-power-monitor-readings"
 plasmoid_id="com.github.galiandan.mipowermonitor"
 
-for command in go kpackagetool6; do
+for command in go python3 kpackagetool6; do
     if ! command -v "$command" >/dev/null 2>&1; then
         say '缺少必要命令：%s' 'Missing required command: %s' "$command" >&2
         exit 1
@@ -109,6 +110,12 @@ if [[ -e "$sensor_command_path" && ! -L "$sensor_command_path" ]]; then
 fi
 ln -sfn "${backend_dir}/read-sensors.sh" "$sensor_command_path"
 
+if [[ -e "$readings_command_path" && ! -L "$readings_command_path" ]]; then
+    say '目标位置已有非符号链接文件，无法覆盖：%s' 'Cannot replace existing non-symlink: %s' "$readings_command_path" >&2
+    exit 1
+fi
+ln -sfn "${backend_dir}/read-readings.py" "$readings_command_path"
+
 if kpackagetool6 --type Plasma/Applet --packageroot "$plasmoid_root" --list 2>/dev/null | grep -Fq "$plasmoid_id"; then
     kpackagetool6 --type Plasma/Applet --packageroot "$plasmoid_root" --upgrade "${script_dir}/package"
 else
@@ -117,6 +124,7 @@ fi
 
 say '\n已安装内置后端和 KDE Plasma 小组件。' '\nInstalled the bundled backend and KDE Plasma widget.'
 say '后端命令：%s' 'Backend command: %s' "$command_path"
+say '同步采样命令：%s' 'Synchronized readings command: %s' "$readings_command_path"
 say '小组件目录：%s/%s' 'Plasma widget: %s/%s' "$plasmoid_root" "$plasmoid_id"
 say '请从 Plasma 小组件列表中添加 Mi Power Monitor。' 'Add Mi Power Monitor from the Plasma widget list.'
 if [[ ":${PATH}:" != *":${bin_dir}:"* ]]; then

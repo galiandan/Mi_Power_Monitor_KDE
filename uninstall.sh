@@ -20,6 +20,7 @@ plasmoid_root="${data_home}/plasma/plasmoids"
 app_dir="${data_home}/mi-power-monitor"
 command_path="${HOME}/.local/bin/xiaomi-power"
 sensor_command_path="${HOME}/.local/bin/mi-power-monitor-sensors"
+readings_command_path="${HOME}/.local/bin/mi-power-monitor-readings"
 config_dir="${config_home}/xiaomi-power"
 config_path="${config_dir}/config.json"
 plasmoid_id="com.github.galiandan.mipowermonitor"
@@ -75,6 +76,19 @@ if [[ -L "$sensor_command_path" ]]; then
     esac
 elif [[ -e "$sensor_command_path" ]]; then
     printf 'Kept non-symlink sensor command file: %s\n' "$sensor_command_path"
+fi
+
+if [[ -L "$readings_command_path" ]]; then
+    target="$(readlink -f -- "$readings_command_path" 2>/dev/null || true)"
+    case "$target" in
+        "${app_dir}"/*)
+            rm -- "$readings_command_path"
+            printf 'Removed synchronized readings link: %s\n' "$readings_command_path"
+            ;;
+        *) printf 'Kept command link not managed by this installer: %s\n' "$readings_command_path" ;;
+    esac
+elif [[ -e "$readings_command_path" ]]; then
+    printf 'Kept non-symlink readings command file: %s\n' "$readings_command_path"
 fi
 
 if [[ -d "$app_dir" ]]; then

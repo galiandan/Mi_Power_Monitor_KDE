@@ -4,7 +4,7 @@
 
 ## 安装
 
-依赖：KDE Plasma 6、`kpackagetool6`、Go 1.25 或更新版本。首次配置设备时还需要 Python 3、pip 和 git，用于运行扫码 token 配置程序。若 RAPL CPU 计数器被系统限制，安装时会请求一次管理员授权，将读取权仅交给当前用户。
+依赖：KDE Plasma 6、`kpackagetool6`、Python 3 和 Go 1.25 或更新版本。首次扫码配置还需要 pip 和 git。若 RAPL CPU 计数器被系统限制，安装时会请求一次管理员授权，将读取权仅交给当前用户。
 
 一键下载安装整套项目（后端、小组件和首次设备配置）：
 
@@ -26,9 +26,9 @@ cd Mi_Power_Monitor_KDE
 
 若 CPU 一项显示 `--W` 且系统的 RAPL `energy_uj` 文件仅允许 root 读取，可运行 `./setup-rapl-access.sh`。系统会要求管理员授权，并只将 RAPL 能量文件开放给当前用户；权限规则会在重启后继续生效。
 
-默认 Full 模式显示 `⚡ 83W · CPU 21W · GPU 37W`；Compact 模式省去 CPU/GPU 标签；Total only 只显示整机功耗。可在组件设置里选择模式并隐藏 CPU 或 GPU。前端每秒异步读取数据，后端单独运行时也支持长轮询：
+默认 Full 模式显示 `⚡ 83W · CPU 21W · GPU 37W`；Compact 模式省去 CPU/GPU 标签；Total only 只显示整机功耗。可在组件设置里选择模式并隐藏 CPU 或 GPU。
 
-组件通过 `xiaomi-power --json` 读取整机功耗。接口返回 `model`、`power`、`unit`、`available`，不可用时 `power` 为 `null`，并可附带 `error`。Plasma 的 executable 数据引擎在命令结束后才交付 stdout，所以组件按一秒间隔调用单次读取；`--watch` 则留给直接运行后端或其他能消费持续输出的客户端。CPU/GPU 使用本仓库的 `backend/read-sensors.sh`，不属于上游插座后端接口。
+组件每秒运行一次 `mi-power-monitor-readings` 采样脚本：它先完成 CPU/GPU 采样，再读取整机功耗，并把三项合并为一条 JSON 快照。QML 收到快照后一次性替换全部读数，避免各自独立的 Plasma executable 数据源让数字错拍。整机读数来自 `xiaomi-power --json`；CPU/GPU 来自本仓库的 `backend/read-sensors.sh`，不属于上游插座后端接口。后端单独运行时仍支持长轮询：
 
 ```bash
 xiaomi-power --watch --json
@@ -69,6 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/galiandan/Mi_Power_Monitor_KDE/main
 - `setup-rapl-access.sh`：为当前用户设置持久、仅用户可读的 RAPL 权限。
 - `.github/workflows/sync-upstream-backend.yml`：每天检查原后端仓库；发现代码或依赖清单更新时创建同步 PR 并启用自动合并。
 - `backend/read-sensors.sh`：以低开销读取 RAPL CPU 和 NVIDIA GPU 功耗。
+- `backend/read-readings.py`：汇总一次 CPU、GPU 和整机功耗采样，让面板同步刷新。
 
 Go 通信依赖由 `backend/go.mod` 和 `backend/go.sum` 固定；扫码配置依赖由 `backend/requirements.txt` 固定。首次构建或首次扫码配置需要联网下载依赖。
 

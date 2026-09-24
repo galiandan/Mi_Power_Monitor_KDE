@@ -16,15 +16,22 @@ PlasmoidItem {
     readonly property bool showCpuReading: displayMode !== 2 && showCpu && anyReadingAvailable
     readonly property bool showGpuReading: displayMode !== 2 && showGpu && anyReadingAvailable
 
-    property real totalPower: 0
-    property real cpuPower: 0
-    property real gpuPower: 0
-    property bool totalAvailable: false
-    property bool cpuAvailable: false
-    property bool gpuAvailable: false
+    property var readings: ({
+        totalPower: 0,
+        cpuPower: 0,
+        gpuPower: 0,
+        totalAvailable: false,
+        cpuAvailable: false,
+        gpuAvailable: false
+    })
+    readonly property real totalPower: readings.totalPower
+    readonly property real cpuPower: readings.cpuPower
+    readonly property real gpuPower: readings.gpuPower
+    readonly property bool totalAvailable: readings.totalAvailable
+    readonly property bool cpuAvailable: readings.cpuAvailable
+    readonly property bool gpuAvailable: readings.gpuAvailable
 
-    readonly property string totalCommand: "bash -c 'exec \"$HOME/.local/bin/xiaomi-power\" --json'"
-    readonly property string sensorsCommand: "bash -c 'exec \"$HOME/.local/bin/mi-power-monitor-sensors\"'"
+    readonly property string readingsCommand: "bash -c 'exec \"$HOME/.local/bin/mi-power-monitor-readings\"'"
 
     preferredRepresentation: fullRepresentation
     activationTogglesExpanded: false
@@ -61,35 +68,36 @@ PlasmoidItem {
         id: executable
         engine: "executable"
         interval: 1000
-        connectedSources: [root.totalCommand, root.sensorsCommand]
+        connectedSources: [root.readingsCommand]
 
         onNewData: (sourceName, data) => {
-            const output = String(data.stdout || "").trim()
-
-            if (sourceName === root.totalCommand) {
-                try {
-                    const result = JSON.parse(output)
-                    root.totalAvailable = result.available === true && root.isPower(result.power)
-                    if (root.totalAvailable)
-                        root.totalPower = result.power
-                } catch (error) {
-                    root.totalAvailable = false
-                }
+            if (sourceName !== root.readingsCommand)
                 return
-            }
 
-            if (sourceName === root.sensorsCommand) {
-                try {
-                    const result = JSON.parse(output)
-                    root.cpuAvailable = root.isPower(result.cpu_power)
-                    root.gpuAvailable = root.isPower(result.gpu_power)
-                    if (root.cpuAvailable)
-                        root.cpuPower = result.cpu_power
-                    if (root.gpuAvailable)
-                        root.gpuPower = result.gpu_power
-                } catch (error) {
-                    root.cpuAvailable = false
-                    root.gpuAvailable = false
+            try {
+                const result = JSON.parse(String(data.stdout || "").trim())
+                const totalAvailable = root.isPower(result.total_power)
+                const cpuAvailable = root.isPower(result.cpu_power)
+                const gpuAvailable = root.isPower(result.gpu_power)
+
+                // Replace the complete snapshot in one assignment so every label
+                // repaints from the same polling cycle.
+                root.readings = {
+                    totalPower: totalAvailable ? result.total_power : root.totalPower,
+                    cpuPower: cpuAvailable ? result.cpu_power : root.cpuPower,
+                    gpuPower: gpuAvailable ? result.gpu_power : root.gpuPower,
+                    totalAvailable: totalAvailable,
+                    cpuAvailable: cpuAvailable,
+                    gpuAvailable: gpuAvailable
+                }
+            } catch (error) {
+                root.readings = {
+                    totalPower: root.totalPower,
+                    cpuPower: root.cpuPower,
+                    gpuPower: root.gpuPower,
+                    totalAvailable: false,
+                    cpuAvailable: false,
+                    gpuAvailable: false
                 }
             }
         }

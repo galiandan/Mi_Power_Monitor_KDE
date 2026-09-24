@@ -4,7 +4,7 @@ A KDE Plasma 6 power display widget for the Xiaomi smart plug 3 (`cuco.plug.v3`)
 
 ## Install
 
-Requirements: KDE Plasma 6, `kpackagetool6`, and Go 1.25 or newer. First-time device setup also needs Python 3, pip, and git for the QR token setup helper. If system policy restricts RAPL CPU counters, installation requests administrator authorization once and grants read access only to the current user.
+Requirements: KDE Plasma 6, `kpackagetool6`, Python 3, and Go 1.25 or newer. First-time QR setup also needs pip and git. If system policy restricts RAPL CPU counters, installation requests administrator authorization once and grants read access only to the current user.
 
 One-command install of the complete project, including backend, widget, and first-time device setup:
 
@@ -26,9 +26,9 @@ The panel shows rounded whole-watt readings for total, CPU, and GPU power. Total
 
 If CPU shows `--W` because the RAPL `energy_uj` files are root-only, run `./setup-rapl-access.sh`. It asks for administrator authorization and grants read access only to your desktop user. The rule persists across reboots.
 
-Full mode shows `83W · CPU 21W · GPU 37W`; Compact omits CPU/GPU labels; Total only keeps the whole-device reading. Choose the mode and toggle CPU/GPU in the widget settings. The frontend requests readings asynchronously every second. The backend also supports continuous polling on its own:
+Full mode shows `83W · CPU 21W · GPU 37W`; Compact omits CPU/GPU labels; Total only keeps the whole-device reading. Choose the mode and toggle CPU/GPU in the widget settings.
 
-The widget reads total power with `xiaomi-power --json`. The contract returns `model`, `power`, `unit`, and `available`; unavailable readings use `power: null` and may include `error`. Plasma's executable data engine delivers stdout when a command exits, so the widget polls the one-shot command once per second. Use `--watch` for direct backend use or clients that consume a continuous stream. CPU/GPU readings come from this repository's `backend/read-sensors.sh`, outside the upstream plug backend API.
+Once per polling cycle, the widget runs `mi-power-monitor-readings`: it samples CPU/GPU first, reads total power, then emits all three values in one JSON snapshot. QML replaces the complete snapshot at once, preventing independently scheduled Plasma executable sources from updating the labels at different times. Total power comes from `xiaomi-power --json`; CPU/GPU readings come from this repository's `backend/read-sensors.sh`, outside the upstream plug backend API. The backend still supports continuous polling when used directly:
 
 ```bash
 xiaomi-power --watch --json
@@ -69,6 +69,7 @@ This keeps the device config and token. To remove them too:
 - `setup-rapl-access.sh`: configure persistent, user-only access to RAPL energy counters.
 - `.github/workflows/sync-upstream-backend.yml`: checks the original backend daily and creates an auto-merge sync PR when source or dependency manifests change.
 - `backend/read-sensors.sh`: reads RAPL CPU and NVIDIA GPU power.
+- `backend/read-readings.py`: gathers one CPU, GPU, and total power snapshot for synchronized panel updates.
 
 Go dependencies are pinned by `backend/go.mod` and `backend/go.sum`; QR setup dependencies are pinned by `backend/requirements.txt`. An internet connection is needed for the first build and QR setup.
 
