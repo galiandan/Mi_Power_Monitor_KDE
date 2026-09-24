@@ -6,6 +6,14 @@ A KDE Plasma 6 power display widget for the Xiaomi smart plug 3 (`cuco.plug.v3`)
 
 Requirements: KDE Plasma 6, `kpackagetool6`, and Go 1.25 or newer. First-time device setup also needs Python 3, pip, and git for the QR token setup helper. If system policy restricts RAPL CPU counters, installation requests administrator authorization once and grants read access only to the current user.
 
+One-command install of the complete project, including backend, widget, and first-time device setup:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/galiandan/Mi_Power_Monitor_KDE/main/install-online.sh | bash
+```
+
+This downloads the repository and runs the unified installer. Cloning the repository and running `./install.sh` is also supported:
+
 ```bash
 git clone https://github.com/galiandan/Mi_Power_Monitor_KDE.git
 cd Mi_Power_Monitor_KDE
@@ -27,6 +35,20 @@ xiaomi-power --watch --json
 ```
 
 ## Uninstall
+
+One-command uninstall, keeping device configuration and token:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/galiandan/Mi_Power_Monitor_KDE/main/uninstall-online.sh | bash
+```
+
+To also remove the Xiaomi config and token:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/galiandan/Mi_Power_Monitor_KDE/main/uninstall-online.sh | bash -s -- --purge-config
+```
+
+You can also run `./uninstall.sh` from a cloned repository.
 
 ```bash
 ./uninstall.sh

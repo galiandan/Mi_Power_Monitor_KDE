@@ -6,6 +6,14 @@
 
 依赖：KDE Plasma 6、`kpackagetool6`、Go 1.25 或更新版本。首次配置设备时还需要 Python 3、pip 和 git，用于运行扫码 token 配置程序。若 RAPL CPU 计数器被系统限制，安装时会请求一次管理员授权，将读取权仅交给当前用户。
 
+一键下载安装整套项目（后端、小组件和首次设备配置）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/galiandan/Mi_Power_Monitor_KDE/main/install-online.sh | bash
+```
+
+这条命令下载仓库并运行统一安装脚本，不需要先单独安装后端或 Plasma 小组件。也可以 clone 仓库后运行 `./install.sh`：
+
 ```bash
 git clone https://github.com/galiandan/Mi_Power_Monitor_KDE.git
 cd Mi_Power_Monitor_KDE
@@ -27,6 +35,20 @@ xiaomi-power --watch --json
 ```
 
 ## 卸载
+
+一键卸载（保留设备配置和 token）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/galiandan/Mi_Power_Monitor_KDE/main/uninstall-online.sh | bash
+```
+
+如果还要删除米家配置和 token：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/galiandan/Mi_Power_Monitor_KDE/main/uninstall-online.sh | bash -s -- --purge-config
+```
+
+也可以在 clone 下来的仓库中运行 `./uninstall.sh`。
 
 ```bash
 ./uninstall.sh
