@@ -12,13 +12,13 @@ KDE Plasma 6 桌面小组件，用于显示米家智能插座的实时功率。�
 ## 本地安装
 
 ```bash
-kpackagetool6 --type Plasma/Applet --install .
+kpackagetool6 --type Plasma/Applet --install package
 ```
 
 安装后，在 Plasma 的小组件列表中添加 **Mi Power Monitor**。开发时更新文件后可运行：
 
 ```bash
-kpackagetool6 --type Plasma/Applet --upgrade .
+kpackagetool6 --type Plasma/Applet --upgrade package
 ```
 
 ## 项目边界

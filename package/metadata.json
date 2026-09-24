@@ -4,7 +4,7 @@
         "Name": "Mi Power Monitor",
         "Description": "Display live power from a Xiaomi smart plug",
         "Category": "System Information",
-        "Icon": "電源",
+        "Icon": "battery",
         "License": "GPL-3.0-only",
         "Version": "0.1.0",
         "Website": "https://github.com/galiandan/Mi_Power_Monitor_KDE",

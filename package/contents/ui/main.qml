@@ -16,7 +16,7 @@ PlasmoidItem {
     implicitHeight: layout.implicitHeight + PlasmaCore.Units.smallSpacing * 2
 
     Plasmoid.title: i18n("Mi Power Monitor")
-    Plasmoid.icon: "電源"
+    Plasmoid.icon: "battery"
     Plasmoid.toolTipMainText: i18n("Mi Power Monitor")
     Plasmoid.toolTipSubText: statusText
 
@@ -31,21 +31,23 @@ PlasmoidItem {
 
             const exitCode = Number(data["exit code"])
             const output = String(data.stdout || "").trim()
-            if (exitCode !== 0 || output.length === 0) {
-                root.statusText = String(data.stderr || i18n("Could not read power" )).trim()
+            if (output.length === 0) {
+                root.statusText = String(data.stderr || i18n("Could not read power")).trim()
                 return
             }
 
             try {
-                const reading = JSON.parse(output)
-                if (reading.available && reading.power !== null && reading.power !== undefined) {
-                    root.powerText = Number(reading.power).toFixed(1)
+                const result = JSON.parse(output)
+                if (result.available && result.power !== null && result.power !== undefined) {
+                    root.powerText = Number(result.power).toFixed(1)
                     root.statusText = i18n("Live power")
                 } else {
-                    root.statusText = reading.error || i18n("Power unavailable")
+                    root.statusText = result.error || i18n("Power unavailable")
                 }
             } catch (error) {
-                root.statusText = i18n("Invalid response from xiaomi-power")
+                root.statusText = exitCode === 0
+                    ? i18n("Invalid response from xiaomi-power")
+                    : String(data.stderr || i18n("Could not read power")).trim()
             }
         }
     }
@@ -74,7 +76,7 @@ PlasmoidItem {
             spacing: PlasmaCore.Units.smallSpacing
 
             PlasmaCore.IconItem {
-                source: "電源"
+                source: "battery"
                 width: PlasmaCore.Units.iconSizes.medium
                 height: width
             }
