@@ -20,7 +20,7 @@ cd Mi_Power_Monitor_KDE
 ./install.sh
 ```
 
-安装脚本会从仓库内的 Go 源码构建后端，将它放在 `~/.local/bin/xiaomi-power`，安装 Plasma 小组件，并在首次安装时引导扫码配置。若已有 `~/.config/xiaomi-power/config.json`，会直接复用。完成后，在 Plasma 小组件列表中添加 **Mi Power Monitor**。
+安装脚本会从仓库内的 Go 源码构建后端，将它放在 `~/.local/bin/xiaomi-power`，安装 Plasma 小组件，并在首次安装时引导扫码配置。若米家账号下有多台插座，扫码后会列出候选设备供你按编号选择；不会输出 token。若已有 `~/.config/xiaomi-power/config.json`，会直接复用。完成后，在 Plasma 小组件列表中添加 **Mi Power Monitor**。
 
 面板显示整机、CPU 和 GPU 的整数瓦数，读取中或不可用时使用 `--W`。整机功耗来自米家智能插座 3；CPU 功耗读取 Linux RAPL 能量计数器并按 1 秒采样间隔计算；NVIDIA GPU 功耗由 `nvidia-smi` 提供。没有对应硬件、驱动或 RAPL 读取权限时，相应项显示 `--W`。鼠标悬停显示 Plasma 原生提示，左键循环切换显示模式，右键可打开设置。
 

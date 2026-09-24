@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 MODEL = "cuco.plug.v3"
 POWER_SIID = 11
@@ -106,6 +106,46 @@ def _read_optional(device: Any, siid: int, piid: int) -> Any | None:
         return None
 
 
+def _device_label(device: Any, ip: str) -> str:
+    if isinstance(device, dict):
+        name = str(device.get("name") or "").strip()
+        did = str(device.get("did") or "").strip()
+    else:
+        name = str(getattr(device, "name", "") or "").strip()
+        did = str(getattr(device, "did", "") or "").strip()
+
+    label = f"IP {ip or 'unknown'}"
+    if name:
+        label += f" — {name}"
+    if did:
+        label += f" (ID …{did[-4:]})"
+    return label
+
+
+def _select_device(matches: list[Any], get_ip: Callable[[Any], str]) -> Any | None:
+    if not matches:
+        print(f"No {MODEL} devices were found.", file=sys.stderr)
+        return None
+    if len(matches) == 1:
+        return matches[0]
+
+    print(f"Found {len(matches)} {MODEL} devices:")
+    for index, device in enumerate(matches, start=1):
+        print(f"  {index}. {_device_label(device, get_ip(device))}")
+
+    while True:
+        try:
+            answer = input(f"Select the plug to configure [1-{len(matches)}; q to cancel]: ").strip()
+        except EOFError:
+            answer = "q"
+        if answer.lower() in {"q", "quit", "cancel"}:
+            print("Device selection cancelled.", file=sys.stderr)
+            return None
+        if answer.isdecimal() and 1 <= int(answer) <= len(matches):
+            return matches[int(answer) - 1]
+        print(f"Enter a number from 1 to {len(matches)}, or q to cancel.", file=sys.stderr)
+
+
 def setup_from_cloud(path: Path) -> int:
     """Fetch the account device list without displaying any device tokens."""
     try:
@@ -147,16 +187,9 @@ def setup_from_cloud(path: Path) -> int:
     matches = [d for d in devices.values() if d.model == MODEL and not d.is_child]
     if preferred_ip:
         matches = [d for d in matches if d.ip == preferred_ip]
-    if len(matches) != 1:
-        print(
-            f"Expected one {MODEL} matching IP {preferred_ip or '(any)'}, found {len(matches)}.",
-            file=sys.stderr,
-        )
-        if matches:
-            print("Matching device IPs: " + ", ".join(d.ip or "unknown" for d in matches), file=sys.stderr)
+    dev = _select_device(matches, lambda device: str(device.ip or ""))
+    if dev is None:
         return 1
-
-    dev = matches[0]
     extra = dev.raw_data.get("extra") or {}
     config = {
         "model": MODEL,
@@ -204,16 +237,9 @@ def setup_from_local_export(path: Path, source: Path) -> int:
             devices = list(BackupDatabaseReader().read_tokens(str(source)))
 
         matches = [d for d in devices if d.model == MODEL and (not preferred_ip or d.ip == preferred_ip)]
-        if len(matches) != 1:
-            print(
-                f"Expected one {MODEL} matching IP {preferred_ip or '(any)'}, found {len(matches)}.",
-                file=sys.stderr,
-            )
-            if matches:
-                print("Matching device IPs: " + ", ".join(d.ip or "unknown" for d in matches), file=sys.stderr)
+        dev = _select_device(matches, lambda device: str(device.ip or ""))
+        if dev is None:
             return 1
-
-        dev = matches[0]
         config = {"model": MODEL, "ip": dev.ip, "token": dev.token, "timeout": 5}
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -339,16 +365,9 @@ def setup_from_qr_extractor(path: Path) -> int:
             ]
             unique = {str(d.get("did")): d for d in devices}
             matches = list(unique.values())
-            if len(matches) != 1:
-                print(
-                    f"Expected one {MODEL} matching IP {preferred_ip or '(any)'}, found {len(matches)}.",
-                    file=sys.stderr,
-                )
-                if matches:
-                    print("Matching IPs: " + ", ".join(str(d.get("localip") or "unknown") for d in matches), file=sys.stderr)
+            device = _select_device(matches, lambda item: str(item.get("localip") or ""))
+            if device is None:
                 return 1
-
-            device = matches[0]
             config = {
                 "model": MODEL,
                 "ip": device.get("localip") or preferred_ip,
