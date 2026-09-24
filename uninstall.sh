@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 purge_config=false
 case "${1:-}" in
     "") ;;
@@ -21,6 +22,29 @@ sensor_command_path="${HOME}/.local/bin/mi-power-monitor-sensors"
 config_dir="${config_home}/xiaomi-power"
 config_path="${config_dir}/config.json"
 plasmoid_id="com.github.galiandan.mipowermonitor"
+plasmoid_config="${config_home}/plasma-org.kde.plasma.desktop-appletsrc"
+
+if command -v qdbus6 >/dev/null 2>&1 && [[ -r "$plasmoid_config" ]]; then
+    while IFS=: read -r containment_id applet_id; do
+        [[ -n "$containment_id" && -n "$applet_id" ]] || continue
+        qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+            "var w = panelById(${containment_id}).widgetById(${applet_id}); if (w) w.remove();" \
+            >/dev/null 2>&1 || true
+    done < <(awk -v plugin="$plasmoid_id" '
+        /^\[Containments\]\[[0-9]+\]\[Applets\]\[[0-9]+\]$/ {
+            line = $0
+            sub(/^\[Containments\]\[/, "", line)
+            split(line, parts, /\]\[/)
+            containment = parts[1]
+            applet = parts[3]
+            sub(/\]$/, "", applet)
+            in_applet = 1
+            next
+        }
+        /^\[/ { in_applet = 0 }
+        in_applet && $0 == "plugin=" plugin { print containment ":" applet }
+    ' "$plasmoid_config")
+fi
 
 if command -v kpackagetool6 >/dev/null 2>&1; then
     kpackagetool6 --type Plasma/Applet --remove "$plasmoid_id" 2>/dev/null || true
@@ -55,6 +79,10 @@ fi
 if [[ -d "$app_dir" ]]; then
     rm -rf -- "$app_dir"
     printf 'Removed bundled backend files: %s\n' "$app_dir"
+fi
+
+if [[ -f /etc/tmpfiles.d/mi-power-monitor-rapl.conf ]]; then
+    "${script_dir}/setup-rapl-access.sh" --remove
 fi
 
 if [[ "$purge_config" == true ]]; then
