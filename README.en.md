@@ -20,7 +20,7 @@ cd Mi_Power_Monitor_KDE
 ./install.sh
 ```
 
-The installer builds the backend from the bundled Go source, installs it at `~/.local/bin/xiaomi-power`, installs the Plasma widget, and guides QR setup on first install. If the Xiaomi account has multiple plugs, QR setup lists them for selection by number without printing tokens. An existing `~/.config/xiaomi-power/config.json` is reused. After installation, add **Mi Power Monitor** from Plasma's widget list.
+The installer builds the backend from the bundled Go source, installs it at `~/.local/bin/xiaomi-power`, and uses `kpackagetool6` to install the widget to `${XDG_DATA_HOME:-~/.local/share}/plasma/plasmoids/com.github.galiandan.mipowermonitor/`. First-time setup guides QR login. If the Xiaomi account has multiple plugs, QR setup lists them for selection by number without printing tokens. An existing `~/.config/xiaomi-power/config.json` is reused. After installation, add **Mi Power Monitor** from Plasma's widget list.
 
 The panel shows rounded whole-watt readings for total, CPU, and GPU power. Total power comes from the Xiaomi Smart Plug 3; CPU power is calculated from Linux RAPL energy counters over a one-second sample; NVIDIA GPU power comes from `nvidia-smi`. Missing hardware, drivers, or RAPL read access show `--W`. Hover uses Plasma's native tooltip, left click cycles display modes, and the standard right-click menu opens settings.
 
@@ -62,14 +62,26 @@ This keeps the device config and token. To remove them too:
 
 ## Repository layout
 
-- `package/`: Plasma 6 widget and power display.
+- `package/`: Standard Plasma 6 KPackage source package. `metadata.json` is at the package root; QML and configuration files are under `contents/`. Plasma installs it as `plasma/plasmoids/com.github.galiandan.mipowermonitor/`.
 - `backend/`: Go reader, Python token setup helper, dependency manifests, and example config.
 - `install.sh` / `uninstall.sh`: build, install, and remove the complete project.
+- `CMakeLists.txt`: Plasma CMake install rule and a ZIP packaging target containing only the Plasmoid.
 - `setup-rapl-access.sh`: configure persistent, user-only access to RAPL energy counters.
 - `.github/workflows/sync-upstream-backend.yml`: checks the original backend daily and creates an auto-merge sync PR when source or dependency manifests change.
 - `backend/read-sensors.sh`: reads RAPL CPU and NVIDIA GPU power.
 
 Go dependencies are pinned by `backend/go.mod` and `backend/go.sum`; QR setup dependencies are pinned by `backend/requirements.txt`. An internet connection is needed for the first build and QR setup.
+
+## Develop and package the widget
+
+Development dependencies are CMake, ECM, and Plasma development files. The CMake install rule targets the system Plasma plugin directory (and normally requires administrator privileges); use the user-level installer above for regular use. To create a ZIP containing only the standard Plasmoid package:
+
+```bash
+cmake -S . -B build
+cmake --build build --target package-plasmoid
+```
+
+The archive is `build/com.github.galiandan.mipowermonitor.zip`. It contains only the standard Plasmoid frontend and can be used with the KDE Store or Plasma's install-from-local-file flow; the power-reading command still needs to be installed and configured with this repository's `install.sh`. Use `install.sh` for the complete integrated setup.
 
 ## Build the backend separately
 

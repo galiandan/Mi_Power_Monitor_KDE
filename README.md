@@ -20,7 +20,7 @@ cd Mi_Power_Monitor_KDE
 ./install.sh
 ```
 
-安装脚本会从仓库内的 Go 源码构建后端，将它放在 `~/.local/bin/xiaomi-power`，安装 Plasma 小组件，并在首次安装时引导扫码配置。若米家账号下有多台插座，扫码后会列出候选设备供你按编号选择；不会输出 token。若已有 `~/.config/xiaomi-power/config.json`，会直接复用。完成后，在 Plasma 小组件列表中添加 **Mi Power Monitor**。
+安装脚本会从仓库内的 Go 源码构建后端，将它放在 `~/.local/bin/xiaomi-power`，并通过 `kpackagetool6` 安装 Plasma 小组件到 `${XDG_DATA_HOME:-~/.local/share}/plasma/plasmoids/com.github.galiandan.mipowermonitor/`。首次安装时会引导扫码配置。若米家账号下有多台插座，扫码后会列出候选设备供你按编号选择；不会输出 token。若已有 `~/.config/xiaomi-power/config.json`，会直接复用。完成后，在 Plasma 小组件列表中添加 **Mi Power Monitor**。
 
 面板显示整机、CPU 和 GPU 的整数瓦数，读取中或不可用时使用 `--W`。整机功耗来自米家智能插座 3；CPU 功耗读取 Linux RAPL 能量计数器并按 1 秒采样间隔计算；NVIDIA GPU 功耗由 `nvidia-smi` 提供。没有对应硬件、驱动或 RAPL 读取权限时，相应项显示 `--W`。鼠标悬停显示 Plasma 原生提示，左键循环切换显示模式，右键可打开设置。
 
@@ -62,14 +62,26 @@ curl -fsSL https://raw.githubusercontent.com/galiandan/Mi_Power_Monitor_KDE/main
 
 ## 仓库结构
 
-- `package/`：Plasma 6 小组件，负责功率显示。
+- `package/`：标准 Plasma 6 KPackage 源码包。`metadata.json` 位于包根目录，QML 和配置文件位于 `contents/`；KDE Plasma 会将它安装为 `plasma/plasmoids/com.github.galiandan.mipowermonitor/`。
 - `backend/`：独立后端的 Go 源码、Python token 配置工具、依赖清单和示例配置。
 - `install.sh` / `uninstall.sh`：构建、安装及卸载整套项目。
+- `CMakeLists.txt`：Plasma CMake 安装规则，并提供仅包含 Plasmoid 文件的 ZIP 打包目标。
 - `setup-rapl-access.sh`：为当前用户设置持久、仅用户可读的 RAPL 权限。
 - `.github/workflows/sync-upstream-backend.yml`：每天检查原后端仓库；发现代码或依赖清单更新时创建同步 PR 并启用自动合并。
 - `backend/read-sensors.sh`：以低开销读取 RAPL CPU 和 NVIDIA GPU 功耗。
 
 Go 通信依赖由 `backend/go.mod` 和 `backend/go.sum` 固定；扫码配置依赖由 `backend/requirements.txt` 固定。首次构建或首次扫码配置需要联网下载依赖。
+
+## 开发与打包小组件
+
+开发依赖：CMake、ECM 和 Plasma 开发文件。CMake 安装规则默认安装到系统 Plasma 插件目录（通常需要管理员权限）；日常安装建议使用上面的用户级安装器。生成仅包含标准 Plasmoid 包内容的 ZIP：
+
+```bash
+cmake -S . -B build
+cmake --build build --target package-plasmoid
+```
+
+生成文件为 `build/com.github.galiandan.mipowermonitor.zip`，内容仅包含标准 Plasmoid 前端，可用于 KDE Store 或 Plasma 的“从本地文件安装”功能；功率读取命令仍需先通过本仓库的 `install.sh` 安装和配置。整合后端的一键安装仍使用 `install.sh`。
 
 ## 从源码单独构建后端
 

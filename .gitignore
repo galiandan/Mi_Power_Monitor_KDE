@@ -1,4 +1,6 @@
 build/
+*.qmlc
+*.jsc
 *.kdev4
 .venv/
 __pycache__/

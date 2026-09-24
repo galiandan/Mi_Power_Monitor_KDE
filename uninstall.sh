@@ -16,6 +16,7 @@ esac
 
 data_home="${XDG_DATA_HOME:-${HOME}/.local/share}"
 config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
+plasmoid_root="${data_home}/plasma/plasmoids"
 app_dir="${data_home}/mi-power-monitor"
 command_path="${HOME}/.local/bin/xiaomi-power"
 sensor_command_path="${HOME}/.local/bin/mi-power-monitor-sensors"
@@ -47,7 +48,7 @@ if command -v qdbus6 >/dev/null 2>&1 && [[ -r "$plasmoid_config" ]]; then
 fi
 
 if command -v kpackagetool6 >/dev/null 2>&1; then
-    kpackagetool6 --type Plasma/Applet --remove "$plasmoid_id" 2>/dev/null || true
+    kpackagetool6 --type Plasma/Applet --packageroot "$plasmoid_root" --remove "$plasmoid_id" 2>/dev/null || true
 fi
 
 if [[ -L "$command_path" ]]; then

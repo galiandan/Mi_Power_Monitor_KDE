@@ -8,6 +8,7 @@
         "License": "GPL-3.0-only",
         "Version": "0.1.0",
         "Website": "https://github.com/galiandan/Mi_Power_Monitor_KDE",
+        "BugReportUrl": "https://github.com/galiandan/Mi_Power_Monitor_KDE/issues",
         "Authors": [
             {
                 "Name": "galiandan"

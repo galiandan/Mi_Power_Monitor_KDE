@@ -4,6 +4,7 @@ set -Eeuo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 data_home="${XDG_DATA_HOME:-${HOME}/.local/share}"
 config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
+plasmoid_root="${data_home}/plasma/plasmoids"
 app_dir="${data_home}/mi-power-monitor"
 backend_dir="${app_dir}/backend"
 config_path="${config_home}/xiaomi-power/config.json"
@@ -30,7 +31,7 @@ if [[ "$go_version" =~ ^1\.([0-9]+) ]] && (( BASH_REMATCH[1] < 25 )); then
     exit 1
 fi
 
-mkdir -p "$backend_dir" "$bin_dir"
+mkdir -p "$backend_dir" "$bin_dir" "$plasmoid_root"
 cp -R "${script_dir}/backend/." "$backend_dir/"
 printf 'Building xiaomi-power from the bundled backend source...\n'
 (
@@ -92,14 +93,15 @@ if [[ -e "$sensor_command_path" && ! -L "$sensor_command_path" ]]; then
 fi
 ln -sfn "${backend_dir}/read-sensors.sh" "$sensor_command_path"
 
-if kpackagetool6 --type Plasma/Applet --list 2>/dev/null | grep -Fq "$plasmoid_id"; then
-    kpackagetool6 --type Plasma/Applet --upgrade "${script_dir}/package"
+if kpackagetool6 --type Plasma/Applet --packageroot "$plasmoid_root" --list 2>/dev/null | grep -Fq "$plasmoid_id"; then
+    kpackagetool6 --type Plasma/Applet --packageroot "$plasmoid_root" --upgrade "${script_dir}/package"
 else
-    kpackagetool6 --type Plasma/Applet --install "${script_dir}/package"
+    kpackagetool6 --type Plasma/Applet --packageroot "$plasmoid_root" --install "${script_dir}/package"
 fi
 
 printf '\nInstalled the bundled backend and KDE Plasma widget.\n'
 printf 'Backend command: %s\n' "$command_path"
+printf 'Plasma widget: %s/%s\n' "$plasmoid_root" "$plasmoid_id"
 printf 'Add Mi Power Monitor from the Plasma widget list.\n'
 if [[ ":${PATH}:" != *":${bin_dir}:"* ]]; then
     printf 'Add this directory to PATH if the widget cannot find xiaomi-power: %s\n' "$bin_dir"
