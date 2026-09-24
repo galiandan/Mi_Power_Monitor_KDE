@@ -62,6 +62,24 @@ else
     printf 'Using existing device config: %s\n' "$config_path"
 fi
 
+shopt -s nullglob
+rapl_energy_files=(/sys/devices/virtual/powercap/intel-rapl/intel-rapl:*/energy_uj)
+if (( ${#rapl_energy_files[@]} > 0 )); then
+    rapl_readable=false
+    for energy_file in "${rapl_energy_files[@]}"; do
+        if [[ -r "$energy_file" ]]; then
+            rapl_readable=true
+            break
+        fi
+    done
+    if [[ "$rapl_readable" == false ]]; then
+        printf 'RAPL CPU energy counters are restricted; requesting user-only access.\n'
+        if ! "${script_dir}/setup-rapl-access.sh" "$(id -un)"; then
+            printf 'CPU power will remain unavailable. You can run setup-rapl-access.sh later.\n' >&2
+        fi
+    fi
+fi
+
 if [[ -e "$command_path" && ! -L "$command_path" ]]; then
     printf 'Cannot replace existing non-symlink: %s\n' "$command_path" >&2
     exit 1

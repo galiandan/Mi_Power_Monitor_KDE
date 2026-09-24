@@ -4,7 +4,7 @@ A KDE Plasma 6 power display widget for the Xiaomi smart plug 3 (`cuco.plug.v3`)
 
 ## Install
 
-Requirements: KDE Plasma 6, `kpackagetool6`, and Go 1.25 or newer. First-time device setup also needs Python 3, pip, and git for the QR token setup helper. Python is not needed to read power after setup.
+Requirements: KDE Plasma 6, `kpackagetool6`, and Go 1.25 or newer. First-time device setup also needs Python 3, pip, and git for the QR token setup helper. If system policy restricts RAPL CPU counters, installation requests administrator authorization once and grants read access only to the current user.
 
 ```bash
 git clone https://github.com/galiandan/Mi_Power_Monitor_KDE.git
@@ -15,6 +15,8 @@ cd Mi_Power_Monitor_KDE
 The installer builds the backend from the bundled Go source, installs it at `~/.local/bin/xiaomi-power`, installs the Plasma widget, and guides QR setup on first install. An existing `~/.config/xiaomi-power/config.json` is reused. After installation, add **Mi Power Monitor** from Plasma's widget list.
 
 The panel shows rounded whole-watt readings for total, CPU, and GPU power. Total power comes from the Xiaomi Smart Plug 3; CPU power is calculated from Linux RAPL energy counters over a one-second sample; NVIDIA GPU power comes from `nvidia-smi`. Missing hardware, drivers, or RAPL read access show `--W`. Hover uses Plasma's native tooltip, left click cycles display modes, and the standard right-click menu opens settings.
+
+If CPU shows `--W` because the RAPL `energy_uj` files are root-only, run `./setup-rapl-access.sh`. It asks for administrator authorization and grants read access only to your desktop user. The rule persists across reboots.
 
 Full mode shows `83W · CPU 21W · GPU 37W`; Compact omits CPU/GPU labels; Total only keeps the whole-device reading. Choose the mode and toggle CPU/GPU in the widget settings. The frontend requests readings asynchronously every second. The backend also supports continuous polling on its own:
 
@@ -41,6 +43,7 @@ This keeps the device config and token. To remove them too:
 - `package/`: Plasma 6 widget and power display.
 - `backend/`: Go reader, Python token setup helper, dependency manifests, and example config.
 - `install.sh` / `uninstall.sh`: build, install, and remove the complete project.
+- `setup-rapl-access.sh`: configure persistent, user-only access to RAPL energy counters.
 - `.github/workflows/sync-upstream-backend.yml`: checks the original backend daily and creates an auto-merge sync PR when source or dependency manifests change.
 - `backend/read-sensors.sh`: reads RAPL CPU and NVIDIA GPU power.
 
