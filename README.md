@@ -37,6 +37,7 @@ xiaomi-power --watch --json
 - `package/`：Plasma 6 小组件，负责功率显示。
 - `backend/`：独立后端的 Go 源码、Python token 配置工具、依赖清单和示例配置。
 - `install.sh` / `uninstall.sh`：构建、安装及卸载整套项目。
+- `.github/workflows/sync-upstream-backend.yml`：每天检查原后端仓库；发现代码或依赖清单更新时创建同步 PR 并启用自动合并。
 
 Go 通信依赖由 `backend/go.mod` 和 `backend/go.sum` 固定；扫码配置依赖由 `backend/requirements.txt` 固定。首次构建或首次扫码配置需要联网下载依赖。
 

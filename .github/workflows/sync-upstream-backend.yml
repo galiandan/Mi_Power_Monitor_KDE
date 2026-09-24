@@ -1,0 +1,64 @@
+name: Sync upstream backend
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out widget repository
+        uses: actions/checkout@v6
+        with:
+          path: widget
+
+      - name: Check out backend repository
+        uses: actions/checkout@v6
+        with:
+          repository: galiandan/Mi_Power_Monitor
+          ref: main
+          path: upstream
+          persist-credentials: false
+
+      - name: Copy backend source and dependency manifests
+        working-directory: widget
+        shell: bash
+        run: |
+          mkdir -p backend/cmd
+          rsync -a --delete ../upstream/cmd/ backend/cmd/
+          for file in go.mod go.sum requirements.txt config.example.json xiaomi_power.py; do
+            if [[ -f "../upstream/$file" ]]; then
+              cp "../upstream/$file" "backend/$file"
+            else
+              rm -f "backend/$file"
+            fi
+          done
+
+      - name: Create or update sync pull request
+        id: sync-pr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ github.token }}
+          path: widget
+          branch: automation/sync-upstream-backend
+          delete-branch: true
+          commit-message: 'chore: sync backend from upstream'
+          title: 'chore: sync backend from upstream'
+          body: |
+            Updates the bundled backend source and dependency manifests from `galiandan/Mi_Power_Monitor`.
+
+            This pull request is managed by the scheduled upstream sync workflow.
+
+      - name: Enable automatic merge
+        if: steps.sync-pr.outputs.pull-request-number != ''
+        working-directory: widget
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.sync-pr.outputs.pull-request-number }}
+        run: gh pr merge "$PR_NUMBER" --auto --squash

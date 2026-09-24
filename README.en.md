@@ -37,6 +37,7 @@ This keeps the device config and token. To remove them too:
 - `package/`: Plasma 6 widget and power display.
 - `backend/`: Go reader, Python token setup helper, dependency manifests, and example config.
 - `install.sh` / `uninstall.sh`: build, install, and remove the complete project.
+- `.github/workflows/sync-upstream-backend.yml`: checks the original backend daily and creates an auto-merge sync PR when source or dependency manifests change.
 
 Go dependencies are pinned by `backend/go.mod` and `backend/go.sum`; QR setup dependencies are pinned by `backend/requirements.txt`. An internet connection is needed for the first build and QR setup.
 
