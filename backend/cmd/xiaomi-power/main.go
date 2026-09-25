@@ -6,11 +6,13 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -36,11 +38,12 @@ type config struct {
 }
 
 type reading struct {
-	Model     string   `json:"model"`
-	Power     *float64 `json:"power"`
-	Unit      string   `json:"unit"`
-	Available bool     `json:"available"`
-	Error     string   `json:"error,omitempty"`
+	Model     string     `json:"model"`
+	Power     *float64   `json:"power"`
+	Unit      string     `json:"unit"`
+	Available bool       `json:"available"`
+	SampledAt *time.Time `json:"sampled_at,omitempty"`
+	Error     string     `json:"error,omitempty"`
 }
 
 func configPath() string {
@@ -56,6 +59,10 @@ func configPath() string {
 
 func loadConfig(path string) (config, error) {
 	var cfg config
+	info, err := os.Lstat(path)
+	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return cfg, errors.New("config file must not be a symbolic link")
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, fmt.Errorf("cannot read config at %s: %w", path, err)
@@ -63,19 +70,25 @@ func loadConfig(path string) (config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("invalid JSON config: %w", err)
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
+		return cfg, errors.New("config must be a JSON object")
+	}
 	cfg.IP = strings.TrimSpace(cfg.IP)
 	cfg.Token = strings.TrimSpace(cfg.Token)
 	if cfg.Model != "" && cfg.Model != model {
 		return cfg, fmt.Errorf("config model must be %s", model)
 	}
-	if strings.TrimSpace(cfg.IP) == "" {
-		return cfg, errors.New("config is missing a non-empty 'ip' field")
+	if net.ParseIP(cfg.IP) == nil {
+		return cfg, errors.New("config 'ip' must be a valid IPv4 or IPv6 address")
 	}
-	if strings.TrimSpace(cfg.Token) == "" || strings.HasPrefix(cfg.Token, "REPLACE_") {
-		return cfg, errors.New("config is missing a real device token")
+	if decoded, err := hex.DecodeString(cfg.Token); err != nil || len(decoded) != 16 {
+		return cfg, errors.New("config token must be a 32-character hexadecimal device token")
 	}
-	if cfg.Timeout <= 0 {
+	if _, present := fields["timeout"]; !present {
 		cfg.Timeout = 5
+	} else if cfg.Timeout < 1 || cfg.Timeout > 60 {
+		return cfg, errors.New("config timeout must be between 1 and 60 seconds")
 	}
 	cfg.Model = model
 	return cfg, nil
@@ -107,6 +120,8 @@ func printReading(asJSON bool, power float64, err error) {
 		result := reading{Model: model, Unit: "W", Available: err == nil}
 		if err == nil {
 			result.Power = &power
+			sampledAt := time.Now().UTC()
+			result.SampledAt = &sampledAt
 		} else {
 			result.Error = err.Error()
 		}
@@ -132,6 +147,7 @@ func startupFailure(asJSON bool, publicMessage, detail string) int {
 func run() int {
 	jsonMode := flag.Bool("json", false, "print newline-delimited JSON readings")
 	watch := flag.Bool("watch", false, "keep one process running and poll continuously")
+	requestTimeout := flag.Duration("timeout", 0, "override the timeout for each LAN request attempt")
 	interval := flag.Duration("interval", defaultTick, "poll interval when using --watch")
 	count := flag.Int("count", 0, "stop after this many watch readings (0 runs until interrupted)")
 	flag.Parse()
@@ -153,10 +169,17 @@ func run() int {
 	if err != nil {
 		return startupFailure(*jsonMode, "cannot load config", err.Error())
 	}
-	if cfg.Timeout > 60 {
-		return startupFailure(*jsonMode, "invalid config timeout", "config timeout must not exceed 60 seconds")
+	configuredTimeout := time.Duration(cfg.Timeout) * time.Second
+	if *requestTimeout < 0 || *requestTimeout > 60*time.Second {
+		return startupFailure(*jsonMode, "invalid request timeout", "request timeout must be between 1ms and 60s")
+	}
+	if *requestTimeout > 0 {
+		configuredTimeout = *requestTimeout
 	}
 	// Ensure credentials stay private, including configs copied from the Python setup.
+	if info, err := os.Lstat(path); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		return startupFailure(*jsonMode, "cannot secure config permissions", "config file must be a regular file, not a symbolic link")
+	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		return startupFailure(*jsonMode, "cannot secure config permissions", "cannot secure config file permissions")
 	}
@@ -164,7 +187,7 @@ func run() int {
 		return startupFailure(*jsonMode, "cannot secure config permissions", "cannot secure config directory permissions")
 	}
 
-	client, err := miio.New(cfg.IP, cfg.Token, miio.WithTimeout(time.Duration(cfg.Timeout)*time.Second), miio.WithRetries(1))
+	client, err := miio.New(cfg.IP, cfg.Token, miio.WithTimeout(configuredTimeout), miio.WithRetries(1))
 	if err != nil {
 		return startupFailure(*jsonMode, "cannot create LAN client", "cannot create LAN client: "+err.Error())
 	}
@@ -172,7 +195,10 @@ func run() int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := client.Handshake(ctx); err != nil {
+	requestBudget := configuredTimeout * 3
+	readCtx, cancel := context.WithTimeout(ctx, requestBudget)
+	if err := client.Handshake(readCtx); err != nil {
+		cancel()
 		return startupFailure(*jsonMode, "LAN handshake failed; check IP, token, and LAN access", "LAN handshake failed; check IP, token, and LAN access: "+err.Error())
 	}
 	var ticker *time.Ticker
@@ -181,7 +207,6 @@ func run() int {
 		defer ticker.Stop()
 	}
 
-	readCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Timeout)*time.Second)
 	power, readErr := readPower(readCtx, client)
 	cancel()
 	printReading(*jsonMode, power, readErr)
@@ -200,13 +225,15 @@ func run() int {
 			return 0
 		case <-ticker.C:
 		}
-		readCtx, cancel = context.WithTimeout(ctx, time.Duration(cfg.Timeout)*time.Second)
+		readCtx, cancel = context.WithTimeout(ctx, requestBudget)
 		power, readErr = readPower(readCtx, client)
 		cancel()
 		if readErr != nil {
 			hadReadError = true
 			// Refresh the device clock after transient packet loss or a long-running session.
-			_ = client.Handshake(ctx)
+			handshakeCtx, handshakeCancel := context.WithTimeout(ctx, configuredTimeout*2)
+			_ = client.Handshake(handshakeCtx)
+			handshakeCancel()
 		}
 		printReading(*jsonMode, power, readErr)
 		reads++

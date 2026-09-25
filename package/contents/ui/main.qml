@@ -13,8 +13,10 @@ PlasmoidItem {
     readonly property bool showCpu: Boolean(plasmoid.configuration.showCpu)
     readonly property bool showGpu: Boolean(plasmoid.configuration.showGpu)
     readonly property bool anyReadingAvailable: totalAvailable || cpuAvailable || gpuAvailable
-    readonly property bool showCpuReading: displayMode !== 2 && showCpu && anyReadingAvailable
-    readonly property bool showGpuReading: displayMode !== 2 && showGpu && anyReadingAvailable
+    property bool keepSecondaryLayout: false
+    readonly property bool showSecondaryReadings: anyReadingAvailable || keepSecondaryLayout
+    readonly property bool showCpuReading: displayMode !== 2 && showCpu && showSecondaryReadings
+    readonly property bool showGpuReading: displayMode !== 2 && showGpu && showSecondaryReadings
 
     property var readings: ({
         totalPower: 0,
@@ -22,7 +24,9 @@ PlasmoidItem {
         gpuPower: 0,
         totalAvailable: false,
         cpuAvailable: false,
-        gpuAvailable: false
+        gpuAvailable: false,
+        status: "unavailable",
+        snapshotSequence: 0
     })
     readonly property real totalPower: readings.totalPower
     readonly property real cpuPower: readings.cpuPower
@@ -31,7 +35,7 @@ PlasmoidItem {
     readonly property bool cpuAvailable: readings.cpuAvailable
     readonly property bool gpuAvailable: readings.gpuAvailable
 
-    readonly property string readingsCommand: "bash -c 'exec \"$HOME/.local/bin/mi-power-monitor-readings\"'"
+    readonly property string readingsCommand: "bash -c 'for p in \"$HOME/.local/bin/mi-power-monitor-readings\" /usr/local/bin/mi-power-monitor-readings /usr/bin/mi-power-monitor-readings; do if [ -x \"$p\" ]; then exec \"$p\"; fi; done; if command -v mi-power-monitor-readings >/dev/null 2>&1; then exec mi-power-monitor-readings; fi; printf \"{\\\"total_power\\\":null,\\\"cpu_power\\\":null,\\\"gpu_power\\\":null,\\\"status\\\":\\\"backend-missing\\\",\\\"snapshot_at\\\":0}\\n\"'"
 
     preferredRepresentation: fullRepresentation
     activationTogglesExpanded: false
@@ -41,12 +45,31 @@ PlasmoidItem {
     toolTipMainText: i18n("功耗")
     toolTipSubText: tooltipText()
 
+    Timer {
+        id: layoutGraceTimer
+        interval: 5000
+        repeat: false
+        onTriggered: root.keepSecondaryLayout = false
+    }
+
+    onAnyReadingAvailableChanged: {
+        if (anyReadingAvailable) {
+            keepSecondaryLayout = true
+            layoutGraceTimer.stop()
+        } else if (keepSecondaryLayout) {
+            layoutGraceTimer.restart()
+        }
+    }
+
     function isPower(value) {
         return typeof value === "number" && Number.isFinite(value) && value >= 0
     }
 
     function powerText(value, available) {
-        return available ? Math.round(value) + "W" : "--W"
+        if (!available)
+            return "--W"
+        const rounded = Math.round(value)
+        return rounded > 9999 ? "9999+W" : rounded + "W"
     }
 
     function tooltipPower(value, available) {
@@ -54,6 +77,10 @@ PlasmoidItem {
     }
 
     function tooltipText() {
+        if (readings.status === "backend-missing")
+            return i18n("未找到功耗读取程序。请运行 KDE 仓库中的 install.sh 安装整套组件和后端。")
+        if (readings.status === "unconfigured")
+            return i18n("米家插座尚未配置或配置无效。请运行 KDE 仓库中的 install.sh 完成二维码配置。")
         return i18n("整机功耗   %1\nCPU        %2\nGPU        %3\n\n数据源\n整机       米家智能插座3\nCPU        RAPL\nGPU        NVIDIA",
                     tooltipPower(totalPower, totalAvailable),
                     tooltipPower(cpuPower, cpuAvailable),
@@ -76,9 +103,14 @@ PlasmoidItem {
 
             try {
                 const result = JSON.parse(String(data.stdout || "").trim())
+                if (result.status === "busy")
+                    return
                 const totalAvailable = root.isPower(result.total_power)
                 const cpuAvailable = root.isPower(result.cpu_power)
                 const gpuAvailable = root.isPower(result.gpu_power)
+                const snapshotSequence = Number(result.snapshot_sequence || 0)
+                if (snapshotSequence > 0 && snapshotSequence < root.readings.snapshotSequence)
+                    return
 
                 // Replace the complete snapshot in one assignment so every label
                 // repaints from the same polling cycle.
@@ -88,7 +120,9 @@ PlasmoidItem {
                     gpuPower: gpuAvailable ? result.gpu_power : root.gpuPower,
                     totalAvailable: totalAvailable,
                     cpuAvailable: cpuAvailable,
-                    gpuAvailable: gpuAvailable
+                    gpuAvailable: gpuAvailable,
+                    status: String(result.status || "unavailable"),
+                    snapshotSequence: snapshotSequence
                 }
             } catch (error) {
                 root.readings = {
@@ -97,7 +131,9 @@ PlasmoidItem {
                     gpuPower: root.gpuPower,
                     totalAvailable: false,
                     cpuAvailable: false,
-                    gpuAvailable: false
+                    gpuAvailable: false,
+                    status: "unavailable",
+                    snapshotSequence: root.readings.snapshotSequence
                 }
             }
         }
@@ -110,7 +146,7 @@ PlasmoidItem {
         implicitHeight: panelRow.implicitHeight
         Layout.minimumWidth: implicitWidth
         Layout.preferredWidth: implicitWidth
-        Layout.minimumHeight: implicitHeight
+        Layout.minimumHeight: 0
         Layout.preferredHeight: implicitHeight
 
     RowLayout {
@@ -140,7 +176,7 @@ PlasmoidItem {
         TextMetrics {
             id: totalMetrics
             font: totalLabel.font
-            text: "8888W"
+            text: "9999+W"
         }
 
         PlasmaComponents.Label {
@@ -166,13 +202,13 @@ PlasmoidItem {
         TextMetrics {
             id: cpuFullMetrics
             font: cpuLabel.font
-            text: "CPU 888W"
+            text: "CPU 9999+W"
         }
 
         TextMetrics {
             id: cpuCompactMetrics
             font: cpuLabel.font
-            text: "888W"
+            text: "9999+W"
         }
 
         PlasmaComponents.Label {
@@ -198,13 +234,13 @@ PlasmoidItem {
         TextMetrics {
             id: gpuFullMetrics
             font: gpuLabel.font
-            text: "GPU 888W"
+            text: "GPU 9999+W"
         }
 
         TextMetrics {
             id: gpuCompactMetrics
             font: gpuLabel.font
-            text: "888W"
+            text: "9999+W"
         }
     }
 

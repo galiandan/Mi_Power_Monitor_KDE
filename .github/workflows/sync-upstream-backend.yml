@@ -1,5 +1,9 @@
 name: Sync upstream backend
 
+concurrency:
+  group: sync-upstream-backend
+  cancel-in-progress: false
+
 on:
   schedule:
     - cron: '17 6 * * *'
@@ -40,6 +44,37 @@ jobs:
             fi
           done
 
+      - name: Record upstream revision
+        id: upstream
+        working-directory: upstream
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: widget/backend/go.mod
+          cache: true
+          cache-dependency-path: widget/backend/go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Validate the bundled backend integration
+        working-directory: widget/backend
+        shell: bash
+        run: |
+          go vet ./...
+          go build ./...
+          go test ./...
+          python -m py_compile xiaomi_power.py read-readings.py read-sensors.py
+          python -m unittest discover -s tests -v
+          bash -n read-sensors.sh
+          bash -n ../install.sh
+          bash -n ../uninstall.sh
+          bash -n ../setup-rapl-access.sh
+
       - name: Create or update sync pull request
         id: sync-pr
         uses: peter-evans/create-pull-request@v8
@@ -51,9 +86,11 @@ jobs:
           commit-message: 'chore: sync backend from upstream'
           title: 'chore: sync backend from upstream'
           body: |
-            Updates the bundled backend source and dependency manifests from `galiandan/Mi_Power_Monitor`.
+            Updates the bundled backend from upstream commit `${{ steps.upstream.outputs.commit }}`.
 
-            This pull request is managed by the scheduled upstream sync workflow.
+            Before opening this pull request, the workflow ran Go vet/build, Python compilation, the sensor and JSON protocol regression checks, and shell syntax checks against this exact copied tree.
+
+            This pull request is managed by the scheduled upstream sync workflow. Automatic merge is requested only after those checks pass.
 
       - name: Enable automatic merge
         if: steps.sync-pr.outputs.pull-request-number != ''

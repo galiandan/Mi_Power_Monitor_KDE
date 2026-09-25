@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import ipaddress
 import json
 import math
 import os
@@ -22,6 +23,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 MODEL = "cuco.plug.v3"
+MAX_ANDROID_BACKUP_BYTES = 4 * 1024**3
+MAX_ANDROID_ARCHIVE_BYTES = 8 * 1024**3
+MAX_ANDROID_DATABASE_BYTES = 256 * 1024**2
+MAX_ANDROID_ARCHIVE_MEMBERS = 100_000
 POWER_SIID = 11
 POWER_PIID = 2
 ENERGY_SIID = 11
@@ -95,6 +100,42 @@ def config_path() -> Path:
     return config_home / "xiaomi-power" / "config.json"
 
 
+def _validate_config_data(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise ValueError(_localized("配置文件必须是 JSON 对象。", "Config must be a JSON object."))
+    if data.get("model", MODEL) != MODEL:
+        raise ValueError(_localized(f"配置中的 model 必须是 {MODEL}。", f"Config model must be {MODEL}."))
+
+    ip = data.get("ip")
+    if not isinstance(ip, str):
+        raise ValueError(_localized("配置缺少有效的插座 IP 地址。", "Config is missing a valid plug IP address."))
+    ip = ip.strip()
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        raise ValueError(_localized("配置中的 ip 必须是有效的 IPv4 或 IPv6 地址。", "Config 'ip' must be a valid IPv4 or IPv6 address.")) from None
+
+    token = data.get("token")
+    if not isinstance(token, str) or not re.fullmatch(r"[0-9a-fA-F]{32}", token.strip()):
+        raise ValueError(_localized(
+            "配置中的 token 必须是插座真实的 32 位十六进制 token。",
+            "Config token must be the device's real 32-character hexadecimal token.",
+        ))
+
+    timeout = data.get("timeout", 5)
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 60:
+        raise ValueError(_localized(
+            "配置中的 timeout 必须是 1 到 60 之间的整数秒。",
+            "Config timeout must be an integer from 1 to 60 seconds.",
+        ))
+
+    data["model"] = MODEL
+    data["ip"] = ip
+    data["token"] = token.strip().lower()
+    data["timeout"] = timeout
+    return data
+
+
 def load_config(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(
@@ -106,6 +147,8 @@ def load_config(path: Path) -> dict[str, Any]:
             )
         )
 
+    if path.is_symlink():
+        raise ValueError(_localized("配置文件不能是符号链接。", "Config file must not be a symbolic link."))
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -114,24 +157,41 @@ def load_config(path: Path) -> dict[str, Any]:
             f"Cannot read JSON config at {path}: {exc.__class__.__name__}.",
         )) from None
 
-    if not isinstance(data, dict):
-        raise ValueError(_localized("配置文件必须是 JSON 对象。", "Config must be a JSON object."))
-    if data.get("model", MODEL) != MODEL:
-        raise ValueError(_localized(f"配置中的 model 必须是 {MODEL}。", f"Config model must be {MODEL}."))
-    for required in ("ip", "token"):
-        if not isinstance(data.get(required), str) or not data[required].strip():
-            raise ValueError(_localized(
-                f"配置缺少非空字段“{required}”。",
-                f"Config is missing a non-empty '{required}' field.",
-            ))
-    token = data["token"].strip()
-    if token.startswith("REPLACE_") or token.lower() in {"your_token", "token"}:
-        raise ValueError(_localized(
-            "请将示例 token 替换为此插座的 32 位 token。",
-            "Replace the example token with this device's 32-character token.",
-        ))
-    data["token"] = token
-    return data
+    return _validate_config_data(data)
+
+
+def save_config(path: Path, data: dict[str, Any]) -> None:
+    """Persist credentials with private permissions and an atomic replacement."""
+    validated = _validate_config_data(dict(data))
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.parent.is_symlink():
+        raise ValueError(_localized("配置目录不能是符号链接。", "Config directory must not be a symbolic link."))
+    path.parent.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    temp_path: Path | None = None
+    try:
+        fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        temp_path = Path(temp_name)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), stat.S_IRUSR | stat.S_IWUSR)
+            json.dump(validated, stream, indent=2, ensure_ascii=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        # os.replace replaces a symlink itself instead of following it. This
+        # lets QR setup repair a bad symlink without touching its target.
+        os.replace(temp_path, path)
+        temp_path = None
+        directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _property_value(response: Any) -> Any:
@@ -254,9 +314,7 @@ def setup_from_cloud(path: Path) -> int:
         "firmware": extra.get("fw_version"),
         "timeout": 5,
     }
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    save_config(path, config)
     password = ""
     _say(f"已保存 {MODEL} 配置（{dev.ip}）；token 仅保存在本机，不会显示。",
          f"Saved {MODEL} config for {dev.ip}; token was stored locally and not displayed.")
@@ -276,15 +334,44 @@ def setup_from_local_export(path: Path, source: Path) -> int:
                 "Android backup password (hidden; Enter if none): ",
                 sys.stderr,
             ))
-            with AndroidBackup(str(source), stream=False) as backup:
-                archive = backup.read_data(backup_password or None)
-                backup_database = archive.extractfile("apps/com.xiaomi.smarthome/db/miio2.db")
-                if backup_database is None:
-                    raise ValueError("Mi Home database is missing from the Android backup")
-                with backup_database, tempfile.NamedTemporaryFile(suffix=".sqlite") as db_file:
-                    shutil.copyfileobj(backup_database, db_file, length=1024 * 1024)
-                    db_file.flush()
-                    devices = list(BackupDatabaseReader().read_tokens(db_file.name))
+            if source.stat().st_size > MAX_ANDROID_BACKUP_BYTES:
+                raise ValueError("Android backup exceeds the 4 GiB input limit")
+            with AndroidBackup(str(source), stream=True) as backup:
+                with backup.read_data(backup_password or None) as archive:
+                    expanded_bytes = 0
+                    database_found = False
+                    with tempfile.NamedTemporaryFile(suffix=".sqlite") as db_file:
+                        for index, member in enumerate(archive):
+                            if index >= MAX_ANDROID_ARCHIVE_MEMBERS:
+                                raise ValueError("Android backup contains too many archive members")
+                            if member.size < 0:
+                                raise ValueError("Android backup contains an invalid member size")
+                            expanded_bytes += member.size
+                            if expanded_bytes > MAX_ANDROID_ARCHIVE_BYTES:
+                                raise ValueError("Android backup exceeds the 8 GiB expanded-data limit")
+                            if member.name != "apps/com.xiaomi.smarthome/db/miio2.db":
+                                continue
+                            if not member.isfile() or member.size > MAX_ANDROID_DATABASE_BYTES:
+                                raise ValueError("Mi Home database is not a regular file or exceeds 256 MiB")
+                            backup_database = archive.extractfile(member)
+                            if backup_database is None:
+                                raise ValueError("Mi Home database cannot be read from the Android backup")
+                            copied = 0
+                            with backup_database:
+                                while chunk := backup_database.read(1024 * 1024):
+                                    copied += len(chunk)
+                                    if copied > MAX_ANDROID_DATABASE_BYTES:
+                                        raise ValueError("Mi Home database exceeds 256 MiB")
+                                    db_file.write(chunk)
+                            if copied != member.size:
+                                raise ValueError("Mi Home database size does not match its archive header")
+                            db_file.flush()
+                            os.fsync(db_file.fileno())
+                            database_found = True
+                            devices = list(BackupDatabaseReader().read_tokens(db_file.name))
+                            break
+                    if not database_found:
+                        raise ValueError("Mi Home database is missing from the Android backup")
         else:
             devices = list(BackupDatabaseReader().read_tokens(str(source)))
 
@@ -293,9 +380,7 @@ def setup_from_local_export(path: Path, source: Path) -> int:
         if dev is None:
             return 1
         config = {"model": MODEL, "ip": dev.ip, "token": dev.token, "timeout": 5}
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+        save_config(path, config)
         _say(f"已保存 {MODEL} 配置（{dev.ip}）；token 仅保存在本机，不会显示。",
              f"Saved {MODEL} config for {dev.ip}; token was stored locally and not displayed.")
         return 0
@@ -486,9 +571,7 @@ def setup_from_qr_extractor(path: Path) -> int:
                 "firmware": (device.get("extra") or {}).get("fw_version"),
                 "timeout": 5,
             }
-            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-            path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            save_config(path, config)
             _say(f"已保存 {MODEL} 配置（{config['ip']}）；token 仅保存在本机，不会显示。",
                  f"Saved {MODEL} config for {config['ip']}; token was stored locally and not displayed.")
             return 0
@@ -605,6 +688,11 @@ def main() -> int:
             "get the device token via recommended Xiaomi QR sign-in without printing tokens",
         ),
     )
+    parser.add_argument(
+        "--validate-config",
+        action="store_true",
+        help=_localized("只检查本机配置格式，不连接插座", "validate the local config without connecting to the plug"),
+    )
     args = parser.parse_args()
 
     path = config_path()
@@ -614,10 +702,19 @@ def main() -> int:
         return setup_from_qr_extractor(path)
     if args.setup_cloud:
         return setup_from_cloud(path)
+    if args.validate_config:
+        try:
+            load_config(path)
+        except Exception as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        return 0
 
     try:
         if path.exists():
             # Keep stored credentials private even if the file was created too openly.
+            if path.is_symlink():
+                raise ValueError(_localized("配置文件不能是符号链接。", "Config file must not be a symbolic link."))
             path.chmod(stat.S_IRUSR | stat.S_IWUSR)
         config = load_config(path)
         result = read_power(config, include_details=args.info, include_energy=args.energy)
