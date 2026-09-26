@@ -26,7 +26,7 @@ versions_dir="${app_dir}/versions"
 current_link="${app_dir}/current"
 config_path="${config_home}/xiaomi-power/config.json"
 bin_dir="${HOME}/.local/bin"
-command_path="${bin_dir}/xiaomi-power"
+command_path="${bin_dir}/mi-power-monitor-backend"
 sensor_command_path="${bin_dir}/mi-power-monitor-sensors"
 readings_command_path="${bin_dir}/mi-power-monitor-readings"
 plasmoid_id="com.github.galiandan.mipowermonitor"
@@ -235,7 +235,7 @@ shopt -s nullglob
 package_dirs=()
 for rapl_dir in /sys/class/powercap/*rapl:*; do
     [[ -d "$rapl_dir" && "${rapl_dir##*/}" =~ rapl:[0-9]+$ ]] || continue
-    domain_name="$(<"${rapl_dir}/name" 2>/dev/null || true)"
+    domain_name="$(cat "${rapl_dir}/name" 2>/dev/null || true)"
     package_name_re='^package([-_[:space:]]?[0-9]+)?$'
     [[ "${domain_name,,}" =~ $package_name_re ]] && package_dirs+=("$rapl_dir")
 done
@@ -253,8 +253,8 @@ if (( ${#package_dirs[@]} > 0 )); then
             fi
         done
     done
-    if [[ "$rapl_readable" == false && "$counters_missing" == false ]]; then
-        say 'RAPL CPU 能量计数器当前有 Package 不可读，正在申请仅当前用户可读的权限。' 'At least one CPU Package RAPL counter is unreadable; requesting user-only access.'
+    if [[ ( "$rapl_readable" == false && "$counters_missing" == false ) || -e /etc/tmpfiles.d/mi-power-monitor-rapl.conf ]]; then
+        say 'RAPL CPU 能量计数器当前有 Package 不可读，正在申请固定 CPU 只读命令的授权。' 'At least one CPU Package RAPL counter is unreadable; requesting access to the fixed read-only CPU command.'
         if ! "${version_dir}/setup-rapl-access.sh" "$(id -un)"; then
             say 'CPU 功耗暂时不可用。之后可运行安装目录中的 setup-rapl-access.sh 再配置权限。' 'CPU power will remain unavailable. You can rerun setup-rapl-access.sh from the installed version later.' >&2
         fi
@@ -307,6 +307,11 @@ else
 fi
 
 preserve_version=true
+# Remove only the legacy KDE alias; standalone backend links are preserved.
+legacy_alias="${bin_dir}/xiaomi-power"
+if [[ -L "$legacy_alias" && "$(readlink -f -- "$legacy_alias")" == "${app_dir}/"* ]]; then
+    rm -- "$legacy_alias"
+fi
 
 # Retain the active version and its immediate predecessor. Delete only marked
 # version directories created by this installer; leave unknown entries alone.

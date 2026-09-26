@@ -64,6 +64,31 @@ def package_domains(root: Path) -> list[Path]:
     return sorted(domains)
 
 
+def read_counters(domains: list[Path]) -> dict[Path, int | None]:
+    paths = [domain / name for domain in domains
+             for name in ("energy_uj", "max_energy_range_uj")]
+    values = {path: read_integer(path) for path in paths}
+    if all(value is not None for value in values.values()):
+        return values
+    if not Path("/usr/local/libexec/mi-power-monitor/read-rapl").is_file():
+        return values
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "--", "/usr/local/libexec/mi-power-monitor/read-rapl"],
+            capture_output=True, text=True, timeout=0.3, check=True,
+        )
+        privileged = json.loads(result.stdout)
+        if not isinstance(privileged, dict):
+            return values
+        for path, value in values.items():
+            candidate = privileged.get(str(path.resolve()))
+            if value is None and type(candidate) is int and candidate >= 0:
+                values[path] = candidate
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    return values
+
+
 def sample_cpu(
     root: Path,
     interval: float = 1.0,
@@ -80,11 +105,12 @@ def sample_cpu(
 
     suspend_before = suspend_offset_ns()
     before: list[tuple[int, int, int]] = []
+    start = monotonic_ns()
+    first = read_counters(domains)
+    end = monotonic_ns()
     for domain in domains:
-        start = monotonic_ns()
-        energy = read_integer(domain / "energy_uj")
-        end = monotonic_ns()
-        maximum = read_integer(domain / "max_energy_range_uj")
+        energy = first[domain / "energy_uj"]
+        maximum = first[domain / "max_energy_range_uj"]
         if energy is None or maximum is None or maximum <= 0:
             return None, None
         before.append((energy, maximum, (start + end) // 2))
@@ -93,10 +119,11 @@ def sample_cpu(
 
     watts: list[float] = []
     sample_times: list[float] = []
+    start = monotonic_ns()
+    second = read_counters(domains)
+    end = monotonic_ns()
     for domain, (initial, maximum, initial_ns) in zip(domains, before, strict=True):
-        start = monotonic_ns()
-        final = read_integer(domain / "energy_uj")
-        end = monotonic_ns()
+        final = second[domain / "energy_uj"]
         if final is None or final < initial:
             # A decrease can mean wraparound, reset, suspend or driver reload.
             # Reject it rather than turn an ambiguous event into a power spike.
@@ -122,7 +149,23 @@ def sample_cpu(
     return sum(watts), sum(sample_times) / len(sample_times)
 
 
+def nvidia_suspended(root: Path = Path("/sys/bus/pci/devices")) -> bool:
+    # Reading sysfs runtime_status does not initialize NVML or wake the GPU.
+    # Skip the all-GPU query if any NVIDIA display device is asleep.
+    for device in root.glob("*"):
+        try:
+            if ((device / "vendor").read_text().strip() == "0x10de"
+                    and (device / "class").read_text().strip().startswith("0x03")
+                    and (device / "power/runtime_status").read_text().strip() != "active"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def read_gpu(timeout: float = 1.4) -> tuple[float | None, float | None]:
+    if nvidia_suspended():
+        return None, None
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=power.draw", "--format=csv,noheader,nounits"],
@@ -151,12 +194,12 @@ def read_gpu(timeout: float = 1.4) -> tuple[float | None, float | None]:
     return sum(values), time.time()
 
 
-def collect(root: Path, interval: float) -> dict[str, float | None]:
+def collect(root: Path, interval: float, *, cpu: bool = True, gpu: bool = True) -> dict[str, float | None]:
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        cpu_future = pool.submit(sample_cpu, root, interval)
-        gpu_future = pool.submit(read_gpu)
-        cpu_power, cpu_time = cpu_future.result()
-        gpu_power, gpu_time = gpu_future.result()
+        cpu_future = pool.submit(sample_cpu, root, interval) if cpu else None
+        gpu_future = pool.submit(read_gpu) if gpu else None
+        cpu_power, cpu_time = cpu_future.result() if cpu_future else (None, None)
+        gpu_power, gpu_time = gpu_future.result() if gpu_future else (None, None)
     return {
         "cpu_power": cpu_power,
         "gpu_power": gpu_power,
@@ -169,9 +212,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--powercap-root", type=Path, default=Path("/sys/class/powercap"))
     parser.add_argument("--interval", type=float, default=1.0)
+    parser.add_argument("--no-cpu", action="store_true")
+    parser.add_argument("--no-gpu", action="store_true")
     args = parser.parse_args()
     interval = min(max(args.interval, 0.05), 4.0)
-    print(json.dumps(collect(args.powercap_root, interval), separators=(",", ":")))
+    print(json.dumps(collect(args.powercap_root, interval, cpu=not args.no_cpu, gpu=not args.no_gpu), separators=(",", ":")))
     return 0
 
 

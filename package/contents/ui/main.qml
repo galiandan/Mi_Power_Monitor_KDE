@@ -35,7 +35,9 @@ PlasmoidItem {
     readonly property bool cpuAvailable: readings.cpuAvailable
     readonly property bool gpuAvailable: readings.gpuAvailable
 
-    readonly property string readingsCommand: "bash -c 'for p in \"$HOME/.local/bin/mi-power-monitor-readings\" /usr/local/bin/mi-power-monitor-readings /usr/bin/mi-power-monitor-readings; do if [ -x \"$p\" ]; then exec \"$p\"; fi; done; if command -v mi-power-monitor-readings >/dev/null 2>&1; then exec mi-power-monitor-readings; fi; printf \"{\\\"total_power\\\":null,\\\"cpu_power\\\":null,\\\"gpu_power\\\":null,\\\"status\\\":\\\"backend-missing\\\",\\\"snapshot_at\\\":0}\\n\"'"
+    readonly property string readingsCommand: "bash -c 'for p in \"$HOME/.local/bin/mi-power-monitor-readings\" /usr/local/bin/mi-power-monitor-readings /usr/bin/mi-power-monitor-readings; do if [ -x \"$p\" ]; then exec \"$p\" \"$@\"; fi; done; if command -v mi-power-monitor-readings >/dev/null 2>&1; then exec mi-power-monitor-readings \"$@\"; fi; printf \"{\\\"total_power\\\":null,\\\"cpu_power\\\":null,\\\"gpu_power\\\":null,\\\"status\\\":\\\"backend-missing\\\",\\\"snapshot_at\\\":0}\\n\"' mi-power-monitor"
+        + ((root.displayMode === 2 || !root.showCpu) ? " --no-cpu" : "")
+        + ((root.displayMode === 2 || !root.showGpu) ? " --no-gpu" : "")
 
     preferredRepresentation: fullRepresentation
     activationTogglesExpanded: false

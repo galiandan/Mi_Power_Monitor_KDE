@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import concurrent.futures
 import fcntl
 import json
@@ -55,6 +56,7 @@ def read_json(command: list[str], timeout: float = SOURCE_TIMEOUT) -> tuple[dict
 def backend_command() -> str | None:
     override = os.environ.get("MI_POWER_MONITOR_XIAOMI_POWER", "").strip()
     candidates = [Path(override)] if override else []
+    candidates.append(Path(__file__).resolve().with_name("xiaomi-power"))
     candidates.append(Path.home() / ".local" / "bin" / "xiaomi-power")
     discovered = shutil.which("xiaomi-power")
     if discovered:
@@ -112,11 +114,12 @@ def create_snapshot(
     }
 
 
-def collect() -> dict[str, Any]:
+def collect(*, cpu: bool = True, gpu: bool = True) -> dict[str, Any]:
     sensor_script = Path(__file__).resolve().with_name("read-sensors.sh")
     plug = backend_command()
     commands: dict[str, list[str] | None] = {
-        "sensors": [str(sensor_script)] if sensor_script.is_file() else None,
+        "sensors": ([str(sensor_script)] + ([] if cpu else ["--no-cpu"])
+                    + ([] if gpu else ["--no-gpu"])) if sensor_script.is_file() and (cpu or gpu) else None,
         "total": [plug, "--json", "--timeout", PLUG_ATTEMPT_TIMEOUT] if plug else None,
     }
 
@@ -155,12 +158,16 @@ def acquire_cycle_lock() -> int | None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--no-cpu", action="store_true")
+    parser.add_argument("--no-gpu", action="store_true")
+    args = parser.parse_args()
     lock_fd = acquire_cycle_lock()
     if lock_fd is None:
         snapshot = {"status": "busy", "snapshot_at": 0, "snapshot_sequence": 0}
     else:
         try:
-            snapshot = collect()
+            snapshot = collect(cpu=not args.no_cpu, gpu=not args.no_gpu)
         finally:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)

@@ -4,7 +4,7 @@
 
 ## 安装
 
-依赖：KDE Plasma 6、`kpackagetool6`、Python 3 和 Go 1.25 或更新版本。首次扫码配置还需要 pip 和 git。若 RAPL CPU 计数器被系统限制，安装时会请求一次管理员授权，将读取权仅交给当前用户。
+依赖：KDE Plasma 6、`kpackagetool6`、Python 3 和 Go 1.25 或更新版本。首次扫码配置还需要 pip 和 git。若 RAPL CPU 计数器被系统限制，安装时会请求一次管理员授权，安装固定 CPU 只读命令（需要 sudo、visudo 和 /usr/bin/python3）。
 
 一键下载安装整套项目（后端、小组件和首次设备配置）：
 
@@ -24,14 +24,14 @@ cd Mi_Power_Monitor_KDE
 
 面板显示整机、CPU 和 GPU 的整数瓦数，读取中或不可用时使用 `--W`。整机功耗来自米家智能插座 3；CPU 功耗只统计识别出的 RAPL Package 域，并使用单调时钟按真实采样时长计算；若采样窗口跨越系统休眠、计数器回退、Package 读取失败或样本不完整，该轮显示 `--W`。NVIDIA GPU 功耗由 `nvidia-smi` 提供，只有所有 GPU 都有有效读数时才汇总。没有对应硬件、驱动或 RAPL 读取权限时，相应项显示 `--W`。鼠标悬停显示 Plasma 原生提示，左键循环切换显示模式，右键可打开设置。
 
-若 CPU 一项显示 `--W` 且系统的 RAPL Package 计数器仅允许 root 读取，可运行 `./setup-rapl-access.sh`。系统会要求管理员授权，并只将全部 Package 的能量及范围文件开放给当前用户；规则保存 UID/GID，并在重启后继续生效。每台系统当前只允许将规则分配给一个用户；需更换用户时，先以原用户运行卸载中的权限恢复，再重新配置。
+若 CPU 一项显示 `--W` 且系统的 RAPL Package 计数器仅允许 root 读取，可运行 `./setup-rapl-access.sh`。系统会要求管理员授权，在 `/usr/local/libexec/mi-power-monitor/read-rapl` 安装 root 所有的固定只读程序，并在 `/etc/sudoers.d/mi-power-monitor-rapl-<UID>` 仅授权当前账户无参数调用。它不修改 sysfs 权限、不启动后台服务，支持不同用户分别安装和卸载授权。程序使用 Python 隔离模式，只返回 Package 能量和范围；成功查询日志与 PAM 会话创建仅对该命令停用，避免每秒刷日志。拒绝访问仍保留日志。旧权限规则仅在快照完整且权限未被管理员改动时迁移；否则保留现场并提示处理。
 
-默认 Full 模式显示 `⚡ 83W · CPU 21W · GPU 37W`；Compact 模式省去 CPU/GPU 标签；Total only 只显示整机功耗。可在组件设置里选择模式并隐藏 CPU 或 GPU。
+默认 Full 模式显示 `⚡ 83W · CPU 21W · GPU 37W`；Compact 模式省去 CPU/GPU 标签；Total only 只显示整机功耗。可在组件设置里选择模式并关闭 CPU 或 GPU；关闭后停用对应采集，Total only 停用两者，tooltip 中未采集项显示 `--W`。检测到 NVIDIA 显示设备处于非 active 状态时跳过 GPU 查询，避免主动唤醒休眠显卡；runtime 状态检查与查询之间仍存在硬件状态变化的时间窗口。
 
-组件按一秒间隔请求 `mi-power-monitor-readings`。采集器并行启动整机和 CPU/GPU 两路任务，两路子进程各有两秒硬截止；插座查询通过 Go 的 `--timeout 500ms` 将最多两次握手尝试和一次属性读取限制在约 1.5 秒内。CPU 使用约一秒的 RAPL 能量窗口，GPU 查询最多 1.4 秒。每项输出独立采样时间，整批 JSON 仍一次交给 QML 更新。非阻塞进程锁会让重叠轮询快速返回 `busy`，QML 忽略该结果，防止慢查询时重复启动采集树。整机读数来自 `xiaomi-power --json`；CPU/GPU 来自本仓库的 `backend/read-sensors.sh`，不属于上游插座后端接口。后端单独运行时仍支持长轮询：
+组件按一秒间隔请求 `mi-power-monitor-readings`。采集器并行启动整机和 CPU/GPU 两路任务，两路子进程各有两秒硬截止；插座查询通过 Go 的 `--timeout 500ms` 将最多两次握手尝试和一次属性读取限制在约 1.5 秒内。CPU 使用约一秒的 RAPL 能量窗口，GPU 查询最多 1.4 秒。每项输出独立采样时间，整批 JSON 仍一次交给 QML 更新。非阻塞进程锁会让重叠轮询快速返回 `busy`，QML 忽略该结果，防止慢查询时重复启动采集树。整机读数来自 `mi-power-monitor-backend --json`；CPU/GPU 来自本仓库的 `backend/read-sensors.sh`，不属于上游插座后端接口。后端单独运行时仍支持长轮询：
 
 ```bash
-xiaomi-power --watch --json
+mi-power-monitor-backend --watch --json
 ```
 
 ## 卸载
@@ -66,7 +66,7 @@ curl -fsSL https://raw.githubusercontent.com/galiandan/Mi_Power_Monitor_KDE/main
 - `backend/`：独立后端的 Go 源码、Python token 配置工具、依赖清单和示例配置。
 - `install.sh` / `uninstall.sh`：构建、安装及卸载整套项目。
 - `CMakeLists.txt`：Plasma CMake 安装规则，并提供仅包含 Plasmoid 文件的 ZIP 打包目标。
-- `setup-rapl-access.sh`：为当前用户设置持久、仅用户可读的 RAPL 权限。
+- `setup-rapl-access.sh`：为当前用户授权固定 CPU 只读命令，保留系统原有 RAPL 权限。
 - `.github/workflows/sync-upstream-backend.yml`：每天检查原后端仓库；发现代码或依赖清单更新时，先构建并运行脚本和 JSON 接口回归，再创建同步 PR 并请求自动合并。
 - `backend/read-sensors.py` / `backend/read-sensors.sh`：按真实时间采样 RAPL Package 和 NVIDIA GPU；Shell 文件保留为启动兼容入口。
 - `backend/read-readings.py`：汇总一次 CPU、GPU 和整机功耗采样，让面板同步刷新。
@@ -98,3 +98,7 @@ CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o xiaomi-power ./cmd/xiaomi-p
 ## 许可证
 
 GNU General Public License v3.0 only，详见 [LICENSE](LICENSE)。Go MIoT 通信库是单独的 MIT 许可证依赖。
+
+### 与独立后端共存
+
+KDE 使用 `~/.local/bin/mi-power-monitor-backend`，采集器优先执行同一版本目录内的后端。独立后端继续使用 `~/.local/bin/xiaomi-power`。升级 KDE 时仅移除指向 KDE 自己目录的旧别名，不覆盖独立后端。两者共享设备配置；另一套安装仍存在时，`--purge-config` 会保留共享 token 并提示。

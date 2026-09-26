@@ -58,122 +58,122 @@ if (( EUID != 0 )); then
     fi
 fi
 
-if ! command -v flock >/dev/null 2>&1; then
-    say '缺少 flock，无法安全串行化系统 RAPL 权限操作。' 'flock is required to serialize system RAPL permission changes.' >&2
-    exit 1
-fi
-install -d -m 0755 /run/lock
-permission_lock="/run/lock/mi-power-monitor-rapl.lock"
-if [[ -L "$permission_lock" ]]; then
-    say 'RAPL 权限锁路径不能是符号链接。' 'The RAPL permission lock path must not be a symbolic link.' >&2
-    exit 1
-fi
-old_umask="$(umask)"
-umask 077
-exec 8>>"$permission_lock"
-umask "$old_umask"
-chmod 0600 "$permission_lock"
-if ! flock -n 8; then
-    say '另一个用户正在修改 RAPL 权限，请稍后重试。' 'Another RAPL permission operation is running; retry shortly.' >&2
-    exit 1
-fi
-
-if [[ -s "$owner_path" ]]; then
-    IFS=: read -r saved_uid saved_gid saved_user < "$owner_path"
-    if [[ "$saved_uid" != "$target_uid" ]]; then
-        say 'RAPL 权限规则已分配给用户 %s；请先由该用户卸载规则，再为其他用户配置。' 'RAPL access is assigned to %s; remove that rule as its owner before configuring another user.' "${saved_user:-UID ${saved_uid}}" >&2
-        exit 1
-    fi
-fi
-
-shopt -s nullglob
-package_dirs=()
-access_files=()
-for rapl_dir in /sys/class/powercap/*rapl:*; do
-    [[ -d "$rapl_dir" && "$(basename "$rapl_dir")" =~ rapl:[0-9]+$ ]] || continue
-    domain_name="$(<"${rapl_dir}/name" 2>/dev/null || true)"
-    package_name_re='^package([-_[:space:]]?[0-9]+)?$'
-    [[ "${domain_name,,}" =~ $package_name_re ]] || continue
-    package_dirs+=("$rapl_dir")
-    for counter in energy_uj max_energy_range_uj; do
-        [[ -e "${rapl_dir}/${counter}" ]] && access_files+=("${rapl_dir}/${counter}")
-    done
+# Only private paths are created or chmodded; shared system directories are untouched.
+for command in flock python3 sudo visudo; do
+    command -v "$command" >/dev/null || { echo "Missing dependency: $command" >&2; exit 1; }
 done
+[[ -x /usr/bin/python3 ]] || { echo "/usr/bin/python3 is required." >&2; exit 1; }
+private_run=/run/mi-power-monitor
+[[ ! -L "$private_run" ]] || exit 1
+install -d -o root -g root -m 0700 "$private_run"
+[[ ! -L "${private_run}/setup.lock" ]] || exit 1
+exec 8>"${private_run}/setup.lock"
+flock -n 8 || { echo 'Another RAPL setup is running.' >&2; exit 1; }
 
-if [[ "$action" == "remove" ]]; then
-    if [[ -s "$state_path" ]]; then
-        while read -r mode uid gid path; do
-            [[ -e "$path" ]] || continue
-            chown "${uid}:${gid}" "$path"
-            chmod "$mode" "$path"
-        done < "$state_path"
-    elif [[ -f "$rule_path" ]]; then
-        # Older versions saved no snapshot and granted every top-level RAPL
-        # energy file to the user. Restore those rule paths to root-only access.
-        while read -r type path _mode _user _group _age _argument; do
-            [[ "$type" == z && "$path" == /sys/*/energy_uj ]] || continue
-            domain="${path%/energy_uj}"
-            [[ "${domain##*/}" =~ rapl:[0-9]+$ && -e "$path" ]] || continue
-            chown root:root "$path"
-            chmod 0400 "$path"
-        done < "$rule_path"
-    fi
-    if [[ -e "$rule_path" ]]; then
-        rm -- "$rule_path"
-    fi
-    if [[ -e "$state_path" ]]; then
-        rm -- "$state_path"
-    fi
-    if [[ -e "$owner_path" ]]; then
-        rm -- "$owner_path"
+# Migrate old chmod-based grants only if the snapshot and applied state agree.
+# Never guess original permissions or overwrite a subsequent admin change.
+if [[ -e "$rule_path" || -e "$state_path" || -e "$owner_path" ]]; then
+    python3 - "$rule_path" "$state_path" "$owner_path" "$target_uid" <<'MIGRATE'
+import os, pathlib, stat, sys
+rule, state, owner = map(pathlib.Path, sys.argv[1:4])
+if not all(p.is_file() and not p.is_symlink() for p in (rule, state, owner)):
+    sys.exit("旧 RAPL 记录不完整，请管理员检查；未猜测或修改原权限。 / Incomplete legacy RAPL state; admin review required.")
+uid, gid, _ = owner.read_text().strip().split(":", 2)
+if uid != sys.argv[4]:
+    sys.exit("Legacy RAPL access belongs to another user; preserve their grant.")
+changes = []
+for line in state.read_text().splitlines():
+    mode, old_uid, old_gid, raw = line.split(maxsplit=3)
+    p = pathlib.Path(raw).resolve()
+    if not str(p).startswith('/sys/devices/') or p.name not in ('energy_uj', 'max_energy_range_uj'):
+        sys.exit('Invalid legacy RAPL snapshot path')
+    if not p.exists():
+        continue
+    info = p.stat()
+    original = (int(mode, 8), int(old_uid), int(old_gid))
+    current = (stat.S_IMODE(info.st_mode), info.st_uid, info.st_gid)
+    if current == original:
+        continue
+    if current != (0o400, int(uid), int(gid)):
+        sys.exit('RAPL 权限已改变，保留管理员设置。 / RAPL permissions changed; preserving administrator settings.')
+    changes.append((p, original))
+for p, (mode, uid, gid) in changes:
+    os.chown(p, uid, gid)
+    os.chmod(p, mode)
+rule.unlink()
+state.unlink()
+owner.unlink()
+MIGRATE
+fi
+
+helper_dir=/usr/local/libexec/mi-power-monitor
+helper="${helper_dir}/read-rapl"
+grant="/etc/sudoers.d/mi-power-monitor-rapl-${target_uid}"
+marker='# Managed by Mi Power Monitor: read-only RAPL broker v1'
+if [[ -e "$grant" || -L "$grant" ]]; then
+    [[ ! -L "$grant" && "$(head -n 1 "$grant")" == "$marker" ]] || { echo 'Unmanaged sudoers path; refusing changes.' >&2; exit 1; }
+fi
+if [[ "$action" == remove ]]; then
+    rm -f -- "$grant"
+    shopt -s nullglob
+    remaining=(/etc/sudoers.d/mi-power-monitor-rapl-*)
+    if (( ${#remaining[@]} == 0 )) && [[ ! -L "$helper_dir" && -f "$helper" && ! -L "$helper" ]] && grep -Fqx "$marker" "$helper"; then
+        rm -- "$helper"
+        rmdir "$helper_dir" 2>/dev/null || true
     fi
     rmdir "$state_dir" 2>/dev/null || true
-    say '已移除持久化 RAPL 权限规则，并恢复原始访问权限。' 'Removed the persistent RAPL permission rule and restored original access.'
+    say '已移除当前用户的 CPU 只读授权。' 'Removed this user’s read-only CPU grant.'
     exit 0
 fi
-
-if (( ${#package_dirs[@]} == 0 || ${#access_files[@]} == 0 )); then
-    say '没有找到可配置的 CPU Package RAPL 计数器。' 'No configurable CPU Package RAPL counters were found.' >&2
-    exit 1
+[[ -d /etc/sudoers.d && ! -L "$helper_dir" ]] || exit 1
+if [[ -e "$helper" || -L "$helper" ]]; then
+    [[ ! -L "$helper" ]] && grep -Fqx "$marker" "$helper" || { echo 'Unmanaged helper; refusing overwrite.' >&2; exit 1; }
 fi
+# Parent path must be root-owned and not writable by other accounts.
+python3 - "$helper_dir" <<'CHECK'
+import pathlib, stat, sys
+for p in [pathlib.Path(sys.argv[1]), *pathlib.Path(sys.argv[1]).parents]:
+    if p.exists() and (p.is_symlink() or p.stat().st_uid != 0 or p.stat().st_mode & 0o022):
+        sys.exit('Unsafe helper directory: ' + str(p))
+CHECK
+install -d -o root -g root -m 0755 "$helper_dir"
+tmp_helper="$(mktemp "${helper_dir}/.reader.XXXXXX")"
+tmp_grant="$(mktemp /etc/sudoers.d/.mi-power-monitor.XXXXXX)"
+trap 'rm -f -- "$tmp_helper" "$tmp_grant"' EXIT
+cat > "$tmp_helper" <<'READER'
+#!/usr/bin/python3 -I
+# Managed by Mi Power Monitor: read-only RAPL broker v1
+import json
+import pathlib
+import re
+import sys
 
-install -d -m 0755 "$state_dir" /etc/tmpfiles.d
-if [[ ! -e "$state_path" ]]; then
-    tmp_state="$(mktemp "${state_dir}/.permissions.XXXXXX")"
-    trap 'rm -f -- "${tmp_state:-}"' EXIT
-    for path in "${access_files[@]}"; do
-        if [[ -e "$rule_path" ]]; then
-            printf '400 0 0 %s\n' "$path" >> "$tmp_state"
-        else
-            stat -c '%a %u %g %n' "$path" >> "$tmp_state"
-        fi
-    done
-    install -m 0600 "$tmp_state" "$state_path"
-    rm -f -- "$tmp_state"
-    trap - EXIT
-fi
-
-tmp_rule="$(mktemp /etc/tmpfiles.d/.mi-power-monitor-rapl.XXXXXX)"
-trap 'rm -f -- "${tmp_rule:-}"' EXIT
-for path in "${access_files[@]}"; do
-    real_path="$(readlink -f -- "$path")"
-    [[ "$real_path" == /sys/* ]] || continue
-    printf 'z %s 0400 %s %s - -\n' "$real_path" "$target_uid" "$target_gid" >> "$tmp_rule"
-done
-if [[ ! -s "$tmp_rule" ]]; then
-    say '无法解析 RAPL 计数器的实际 sysfs 路径。' 'Could not resolve Package RAPL counters to their sysfs paths.' >&2
-    exit 1
-fi
-install -m 0644 "$tmp_rule" "$rule_path"
-systemd-tmpfiles --create "$rule_path"
-printf '%s:%s:%s\n' "$target_uid" "$target_gid" "$target_user" > "${owner_path}.tmp"
-chmod 0600 "${owner_path}.tmp"
-mv -f -- "${owner_path}.tmp" "$owner_path"
-rm -f -- "$tmp_rule"
+if len(sys.argv) != 1:
+    sys.exit(2)
+values = {}
+for domain in pathlib.Path('/sys/class/powercap').glob('*rapl:[0-9]*'):
+    if not re.search(r'rapl:\d+$', domain.name):
+        continue
+    try:
+        if not re.fullmatch(r'package(?:[-_ ]?\d+)?', (domain / 'name').read_text().strip(), re.I):
+            continue
+        for name in ('energy_uj', 'max_energy_range_uj'):
+            path = (domain / name).resolve()
+            if not str(path).startswith('/sys/devices/'):
+                continue
+            value = path.read_text(encoding='ascii').strip()
+            if value.isdecimal():
+                values[str(path)] = int(value)
+    except (OSError, UnicodeError):
+        continue
+print(json.dumps(values))
+READER
+printf '%s\n#%s ALL=(root) NOPASSWD: NOSETENV: %s ""\nDefaults!%s !log_allowed, !pam_session, !pam_setcred\n' "$marker" "$target_uid" "$helper" "$helper" > "$tmp_grant"
+visudo -cf "$tmp_grant"
+chmod 0755 "$tmp_helper"
+chmod 0440 "$tmp_grant"
+chown root:root "$tmp_helper" "$tmp_grant"
+mv -fT -- "$tmp_helper" "$helper"
+mv -fT -- "$tmp_grant" "$grant"
 trap - EXIT
-
-say '已允许用户 %s 读取所有 CPU Package RAPL 计数器。' 'Granted user %s access to all CPU Package RAPL counters.' "$target_user"
-say '持久化规则：%s' 'Persistent rule: %s' "$rule_path"
-for path in "${access_files[@]}"; do
-    stat -c '%A %U:%G %n' "$path"
-done
+say '已授权固定 CPU 只读命令；未修改 sysfs 权限或系统服务。' 'Granted the fixed read-only CPU command; sysfs permissions and system services are unchanged.'

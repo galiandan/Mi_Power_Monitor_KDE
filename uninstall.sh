@@ -35,7 +35,7 @@ config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
 plasmoid_root="${data_home}/plasma/plasmoids"
 app_dir="${data_home}/mi-power-monitor"
 versions_dir="${app_dir}/versions"
-command_path="${HOME}/.local/bin/xiaomi-power"
+command_path="${HOME}/.local/bin/mi-power-monitor-backend"
 sensor_command_path="${HOME}/.local/bin/mi-power-monitor-sensors"
 readings_command_path="${HOME}/.local/bin/mi-power-monitor-readings"
 config_dir="${config_home}/xiaomi-power"
@@ -133,10 +133,10 @@ remove_managed_link() {
 rapl_rule="/etc/tmpfiles.d/mi-power-monitor-rapl.conf"
 rapl_state="/var/lib/mi-power-monitor/rapl-permissions.before"
 rapl_owner="/var/lib/mi-power-monitor/rapl-permissions.owner"
-if [[ -e "$rapl_rule" || -e "$rapl_state" || -e "$rapl_owner" ]]; then
-    rapl_helper="${app_dir}/current/setup-rapl-access.sh"
+if [[ -e "$rapl_rule" || -e "$rapl_state" || -e "$rapl_owner" || -x /usr/local/libexec/mi-power-monitor/read-rapl || -e "/etc/sudoers.d/mi-power-monitor-rapl-$(id -u)" ]]; then
+    rapl_helper="${script_dir}/setup-rapl-access.sh"
     if [[ ! -x "$rapl_helper" ]]; then
-        rapl_helper="${script_dir}/setup-rapl-access.sh"
+        rapl_helper="${app_dir}/current/setup-rapl-access.sh"
     fi
     if [[ -x "$rapl_helper" ]]; then
         if ! "$rapl_helper" --remove; then
@@ -151,6 +151,7 @@ if [[ -e "$rapl_rule" || -e "$rapl_state" || -e "$rapl_owner" ]]; then
     fi
 fi
 
+remove_managed_link "${HOME}/.local/bin/xiaomi-power" legacy
 remove_managed_link "$command_path" 'backend'
 remove_managed_link "$sensor_command_path" 'sensor'
 remove_managed_link "$readings_command_path" 'readings'
@@ -184,6 +185,10 @@ elif [[ "$permission_restore_failed" == false && "$package_remove_failed" == fal
     rmdir "${app_dir}/backend/cmd" "${app_dir}/backend" "$app_dir" 2>/dev/null || true
 fi
 
+if [[ "$purge_config" == true && -d "${data_home}/xiaomi-power/versions" ]]; then
+    say '独立后端仍在使用共享配置，保留 token。' 'The standalone backend still uses the shared config; keeping the token.'
+    purge_config=false
+fi
 if [[ "$purge_config" == true ]]; then
     if [[ -e "$config_path" || -L "$config_path" ]]; then
         if rm -f -- "$config_path"; then

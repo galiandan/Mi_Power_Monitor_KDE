@@ -4,7 +4,7 @@ A KDE Plasma 6 power display widget for the Xiaomi smart plug 3 (`cuco.plug.v3`)
 
 ## Install
 
-Requirements: KDE Plasma 6, `kpackagetool6`, Python 3, and Go 1.25 or newer. First-time QR setup also needs pip and git. If system policy restricts RAPL CPU counters, installation requests administrator authorization once and grants read access only to the current user.
+Requirements: KDE Plasma 6, `kpackagetool6`, Python 3, and Go 1.25 or newer. First-time QR setup also needs pip and git. If system policy restricts RAPL CPU counters, installation requests administrator authorization once and installs a fixed read-only CPU broker (requires sudo, visudo and /usr/bin/python3).
 
 One-command install of the complete project, including backend, widget, and first-time device setup:
 
@@ -20,18 +20,18 @@ cd Mi_Power_Monitor_KDE
 ./install.sh
 ```
 
-The installer builds the backend from the bundled Go source, installs it at `~/.local/bin/xiaomi-power`, and uses `kpackagetool6` to install the widget to `${XDG_DATA_HOME:-~/.local/share}/plasma/plasmoids/com.github.galiandan.mipowermonitor/`. First-time setup recommends Xiaomi QR sign-in and tries to open the local login page in the default browser; it also prints the URL in case you need to open it manually. Scan the QR code in the terminal with Mi Home on your phone and approve the sign-in. If the Xiaomi account has multiple plugs, QR setup lists them for selection by number without printing tokens. An existing `~/.config/xiaomi-power/config.json` is reused. After installation, add **Mi Power Monitor** from Plasma's widget list.
+The installer builds the backend from the bundled Go source, installs it at `~/.local/bin/mi-power-monitor-backend`, and uses `kpackagetool6` to install the widget to `${XDG_DATA_HOME:-~/.local/share}/plasma/plasmoids/com.github.galiandan.mipowermonitor/`. First-time setup recommends Xiaomi QR sign-in and tries to open the local login page in the default browser; it also prints the URL in case you need to open it manually. Scan the QR code in the terminal with Mi Home on your phone and approve the sign-in. If the Xiaomi account has multiple plugs, QR setup lists them for selection by number without printing tokens. An existing `~/.config/xiaomi-power/config.json` is reused. After installation, add **Mi Power Monitor** from Plasma's widget list.
 
 The panel shows rounded whole-watt readings for total, CPU, and GPU power. Total power comes from the Xiaomi Smart Plug 3; CPU power is calculated from Linux RAPL energy counters over a one-second sample; NVIDIA GPU power comes from `nvidia-smi`. Missing hardware, drivers, or RAPL read access show `--W`. Hover uses Plasma's native tooltip, left click cycles display modes, and the standard right-click menu opens settings.
 
-If CPU shows `--W` because the RAPL `energy_uj` files are root-only, run `./setup-rapl-access.sh`. It asks for administrator authorization and grants read access only to your desktop user. The rule persists across reboots.
+If CPU shows `--W` because the RAPL `energy_uj` files are root-only, run `./setup-rapl-access.sh`. It installs a root-owned, argument-free reader at `/usr/local/libexec/mi-power-monitor/read-rapl` and a per-UID sudoers grant. It preserves sysfs permissions and installs no service. Python isolated mode prevents user module injection. Successful-command logging and PAM session/credential setup are disabled only for this reader to avoid polling log churn; denied commands remain logged. Legacy grants migrate only with complete snapshots and unchanged permissions. Each user can remove their own grant independently.
 
-Full mode shows `83W · CPU 21W · GPU 37W`; Compact omits CPU/GPU labels; Total only keeps the whole-device reading. Choose the mode and toggle CPU/GPU in the widget settings.
+Full mode shows `83W · CPU 21W · GPU 37W`; Compact omits CPU/GPU labels; Total only keeps the whole-device reading. Disabling CPU/GPU also stops that collection; Total only stops both. Unsampled tooltip values show --W. GPU queries are skipped when an NVIDIA display device is not runtime-active; a hardware state change between checking and querying remains possible.
 
-Once per polling cycle, the widget runs `mi-power-monitor-readings`: it samples CPU/GPU first, reads total power, then emits all three values in one JSON snapshot. QML replaces the complete snapshot at once, preventing independently scheduled Plasma executable sources from updating the labels at different times. Total power comes from `xiaomi-power --json`; CPU/GPU readings come from this repository's `backend/read-sensors.sh`, outside the upstream plug backend API. The backend still supports continuous polling when used directly:
+Once per polling cycle, the widget runs `mi-power-monitor-readings`: it samples CPU/GPU and total power concurrently, then emits all three values in one JSON snapshot. QML replaces the complete snapshot at once, preventing independently scheduled Plasma executable sources from updating the labels at different times. Total power comes from `mi-power-monitor-backend --json`; CPU/GPU readings come from this repository's `backend/read-sensors.sh`, outside the upstream plug backend API. The backend still supports continuous polling when used directly:
 
 ```bash
-xiaomi-power --watch --json
+mi-power-monitor-backend --watch --json
 ```
 
 ## Uninstall
@@ -66,7 +66,7 @@ This keeps the device config and token. To remove them too:
 - `backend/`: Go reader, Python token setup helper, dependency manifests, and example config.
 - `install.sh` / `uninstall.sh`: build, install, and remove the complete project.
 - `CMakeLists.txt`: Plasma CMake install rule and a ZIP packaging target containing only the Plasmoid.
-- `setup-rapl-access.sh`: configure persistent, user-only access to RAPL energy counters.
+- `setup-rapl-access.sh`: authorize the fixed read-only CPU broker without changing sysfs permissions.
 - `.github/workflows/sync-upstream-backend.yml`: checks the original backend daily and creates an auto-merge sync PR when source or dependency manifests change.
 - `backend/read-sensors.sh`: reads RAPL CPU and NVIDIA GPU power.
 - `backend/read-readings.py`: gathers one CPU, GPU, and total power snapshot for synchronized panel updates.
@@ -96,3 +96,7 @@ For manual setup, copy `backend/config.example.json` to `~/.config/xiaomi-power/
 ## License
 
 GNU General Public License v3.0 only. See [LICENSE](LICENSE). The Go MIoT transport is a separate MIT-licensed dependency.
+
+### Standalone backend coexistence
+
+The widget uses `mi-power-monitor-backend` and prefers its own bundled executable. The standalone installation retains `xiaomi-power`. Upgrades remove only legacy aliases owned by the widget. Both share the device config; uninstall with `--purge-config` preserves it while the other installation remains.
