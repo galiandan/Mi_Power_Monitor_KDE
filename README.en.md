@@ -4,7 +4,7 @@ A KDE Plasma 6 power display widget for the Xiaomi smart plug 3 (`cuco.plug.v3`)
 
 ## Install
 
-Requirements: KDE Plasma 6, `kpackagetool6`, Python 3, and Go 1.25 or newer. First-time QR setup also needs pip and git. If system policy restricts RAPL CPU counters, installation requests administrator authorization once and installs a fixed read-only CPU broker (requires sudo, visudo and /usr/bin/python3).
+Requirements: KDE Plasma 6, `kpackagetool6`, Python 3, and Go 1.25 or newer. QR setup uses the bundled Go binary; no pip, git or Python venv is required. If system policy restricts RAPL CPU counters, installation requests administrator authorization once and installs a fixed read-only CPU broker (requires sudo, visudo and /usr/bin/python3).
 
 One-command install of the complete project, including backend, widget, and first-time device setup:
 
@@ -20,7 +20,7 @@ cd Mi_Power_Monitor_KDE
 ./install.sh
 ```
 
-The installer builds the backend from the bundled Go source, installs it at `~/.local/bin/mi-power-monitor-backend`, and uses `kpackagetool6` to install the widget to `${XDG_DATA_HOME:-~/.local/share}/plasma/plasmoids/com.github.galiandan.mipowermonitor/`. First-time setup recommends Xiaomi QR sign-in and tries to open the local login page in the default browser; it also prints the URL in case you need to open it manually. Scan the QR code in the terminal with Mi Home on your phone and approve the sign-in. If the Xiaomi account has multiple plugs, QR setup lists them for selection by number without printing tokens. An existing `~/.config/xiaomi-power/config.json` is reused. After installation, add **Mi Power Monitor** from Plasma's widget list.
+The installer builds the backend from the bundled Go source, installs it at `~/.local/bin/mi-power-monitor-backend`, and uses `kpackagetool6` to install the widget to `${XDG_DATA_HOME:-~/.local/share}/plasma/plasmoids/com.github.galiandan.mipowermonitor/`. First-time setup recommends Xiaomi QR sign-in and tries to open the local login page in the default browser; it also prints the URL in case you need to open it manually. Scan the QR code in the local browser page with Mi Home on your phone and approve the sign-in. If the Xiaomi account has multiple plugs, QR setup lists them for selection by number without printing tokens. An existing `~/.config/xiaomi-power/config.json` is reused. After installation, add **Mi Power Monitor** from Plasma's widget list.
 
 The panel shows rounded whole-watt readings for total, CPU, and GPU power. Total power comes from the Xiaomi Smart Plug 3; CPU power is calculated from Linux RAPL energy counters over a one-second sample; NVIDIA GPU power comes from `nvidia-smi`. Missing hardware, drivers, or RAPL read access show `--W`. Hover uses Plasma's native tooltip, left click cycles display modes, and the standard right-click menu opens settings.
 
@@ -71,7 +71,7 @@ This keeps the device config and token. To remove them too:
 - `backend/read-sensors.sh`: reads RAPL CPU and NVIDIA GPU power.
 - `backend/read-readings.py`: gathers one CPU, GPU, and total power snapshot for synchronized panel updates.
 
-Go dependencies are pinned by `backend/go.mod` and `backend/go.sum`; QR setup dependencies are pinned by `backend/requirements.txt`. An internet connection is needed for the first build and QR setup.
+Go dependencies are pinned by `backend/go.mod` and `backend/go.sum`; QR setup uses the Go standard library, while `backend/requirements.txt` is for optional legacy Python tools. The first build downloads Go modules; QR setup connects directly to Xiaomi.
 
 ## Develop and package the widget
 
@@ -100,3 +100,9 @@ GNU General Public License v3.0 only. See [LICENSE](LICENSE). The Go MIoT transp
 ### Standalone backend coexistence
 
 The widget uses `mi-power-monitor-backend` and prefers its own bundled executable. The standalone installation retains `xiaomi-power`. Upgrades remove only legacy aliases owned by the widget. Both share the device config; uninstall with `--purge-config` preserves it while the other installation remains.
+
+### Built-in QR login
+
+The Go binary now handles QR login directly with `--setup-cloud-qr`. It asks for a region (default cn), opens a temporary browser page on 127.0.0.1 with a random port/path, and saves only the selected plug configuration with private permissions. No Python environment, pip or external login tool is downloaded. `--region cn --no-browser` prints the local URL without opening a browser. Use `--validate-config` to validate without a LAN request. The KDE command is `mi-power-monitor-backend`; its sensor scripts still use system Python.
+
+The Xiaomi cloud protocol may change. A live QR challenge was retrieved and cancelled; complete account authorization/device discovery remains unverified on a real account. Legacy Python tools remain optional.

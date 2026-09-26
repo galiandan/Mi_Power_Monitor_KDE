@@ -36,7 +36,7 @@ jobs:
         run: |
           mkdir -p backend/cmd
           rsync -a --delete ../upstream/cmd/ backend/cmd/
-          for file in go.mod go.sum requirements.txt config.example.json xiaomi_power.py; do
+          for file in go.mod go.sum requirements.txt config.example.json xiaomi_power.py THIRD_PARTY_NOTICES.md; do
             if [[ -f "../upstream/$file" ]]; then
               cp "../upstream/$file" "backend/$file"
             else

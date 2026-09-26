@@ -32,25 +32,10 @@ class QrSetupTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 qr._run_qr_git(['fetch'])
 
-    def test_dependency_timeout_is_visible_and_stops_before_login(self):
+    def test_installer_uses_native_qr_without_python_downloads(self):
         source = (ROOT / 'install.sh').read_text()
-        function = source.split('prepare_python_setup() {', 1)[1].split('\n}\n', 1)[0]
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / '.venv/bin').mkdir(parents=True)
-            python = root / '.venv/bin/python'
-            python.write_text('#!/bin/sh\nexit 99\n')
-            python.chmod(0o755)
-            timeout = root / 'timeout'
-            timeout.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\nexit 124\n')
-            timeout.chmod(0o755)
-            script = 'say() { printf "%s\\n" "$2"; }\nprepare_python_setup() {' + function + '\n}\nprepare_python_setup\n'
-            result = subprocess.run(['bash', '-c', script], env={**os.environ, 'version_dir': tmp, 'PATH': tmp + ':' + os.environ['PATH']}, capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('Downloading QR dependencies', result.stdout)
-            self.assertIn('300s', result.stdout)
-            self.assertIn('exceeded 5 minutes', result.stderr)
-            self.assertNotIn('dependencies are ready', result.stdout)
-            self.assertNotIn('--quiet', result.stdout)
-            self.assertNotIn('requirements.txt', result.stdout)
-            self.assertIn('pycryptodome', result.stdout)
+        function = source.split('prepare_native_setup() {', 1)[1].split('\n}\n', 1)[0]
+        self.assertIn('"${version_dir}/xiaomi-power" --setup-cloud-qr', function)
+        self.assertNotIn('pip install', function)
+        self.assertNotIn('venv', function)
+        self.assertNotIn('git ', function)

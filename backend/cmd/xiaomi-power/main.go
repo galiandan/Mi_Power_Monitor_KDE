@@ -145,12 +145,30 @@ func startupFailure(asJSON bool, publicMessage, detail string) int {
 }
 
 func run() int {
+	setup := flag.Bool("setup-cloud-qr", false, "configure the plug using local browser QR login")
+	validate := flag.Bool("validate-config", false, "validate device config without LAN access")
+	region := flag.String("region", "", "Xiaomi cloud region for QR setup (default: ask, cn)")
+	noBrowser := flag.Bool("no-browser", false, "print the local QR URL without opening a browser")
 	jsonMode := flag.Bool("json", false, "print newline-delimited JSON readings")
 	watch := flag.Bool("watch", false, "keep one process running and poll continuously")
 	requestTimeout := flag.Duration("timeout", 0, "override the timeout for each LAN request attempt")
 	interval := flag.Duration("interval", defaultTick, "poll interval when using --watch")
 	count := flag.Int("count", 0, "stop after this many watch readings (0 runs until interrupted)")
 	flag.Parse()
+	if *setup {
+		if err := setupCloudQR(*region, *noBrowser); err != nil {
+			fmt.Fprintln(os.Stderr, localText("扫码配置失败：", "QR setup failed:"), err)
+			return 1
+		}
+		return 0
+	}
+	if *validate {
+		if _, err := loadConfig(configPath()); err != nil {
+			fmt.Fprintln(os.Stderr, localText("配置缺失或无效，请运行 --setup-cloud-qr。", "Config missing or invalid; run --setup-cloud-qr."))
+			return 1
+		}
+		return 0
+	}
 
 	if *interval <= 0 {
 		fmt.Fprintln(os.Stderr, "interval must be greater than zero")

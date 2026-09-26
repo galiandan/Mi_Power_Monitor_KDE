@@ -4,7 +4,7 @@
 
 ## 安装
 
-依赖：KDE Plasma 6、`kpackagetool6`、Python 3 和 Go 1.25 或更新版本。首次扫码配置还需要 pip 和 git。若 RAPL CPU 计数器被系统限制，安装时会请求一次管理员授权，安装固定 CPU 只读命令（需要 sudo、visudo 和 /usr/bin/python3）。
+依赖：KDE Plasma 6、`kpackagetool6`、Python 3 和 Go 1.25 或更新版本。首次扫码直接使用内置 Go 后端，不需要 pip、git 或 Python venv。若 RAPL CPU 计数器被系统限制，安装时会请求一次管理员授权，安装固定 CPU 只读命令（需要 sudo、visudo 和 /usr/bin/python3）。
 
 一键下载安装整套项目（后端、小组件和首次设备配置）：
 
@@ -20,7 +20,7 @@ cd Mi_Power_Monitor_KDE
 ./install.sh
 ```
 
-安装脚本在独立版本目录构建后端，并原子切换 `current` 链接；成功升级后保留当前版和上一版。只复制列出的源码和清单，不会把开发目录里的虚拟环境或缓存带入安装。构建、配置或 Plasma 包升级失败时会尝试恢复旧链接和旧组件包；若旧版本清理失败会保留目录并提示。安装和卸载共用用户级互斥锁。已存在的配置会先离线校验 JSON、设备型号、IP、token 和超时；无效时引导重新扫码，旧配置在新配置成功保存前保留。首次安装优先使用米家二维码登录：脚本会尝试自动打开本机浏览器中的登录页面，并显示网址；若浏览器没有弹出，可手动访问该网址，再用手机米家 App 扫描终端中的二维码并确认登录。若账号下有多台插座，扫码后会列出候选设备供你按编号选择；不会输出 token。完成后，在 Plasma 小组件列表中添加 **Mi Power Monitor**。
+安装脚本在独立版本目录构建后端，并原子切换 `current` 链接；成功升级后保留当前版和上一版。只复制列出的源码和清单，不会把开发目录里的虚拟环境或缓存带入安装。构建、配置或 Plasma 包升级失败时会尝试恢复旧链接和旧组件包；若旧版本清理失败会保留目录并提示。安装和卸载共用用户级互斥锁。已存在的配置会先离线校验 JSON、设备型号、IP、token 和超时；无效时引导重新扫码，旧配置在新配置成功保存前保留。首次安装优先使用米家二维码登录：脚本会尝试自动打开本机浏览器中的登录页面，并显示网址；若浏览器没有弹出，可手动访问该网址，再用手机米家 App 扫描浏览器页面中的二维码并确认登录。若账号下有多台插座，扫码后会列出候选设备供你按编号选择；不会输出 token。完成后，在 Plasma 小组件列表中添加 **Mi Power Monitor**。
 
 面板显示整机、CPU 和 GPU 的整数瓦数，读取中或不可用时使用 `--W`。整机功耗来自米家智能插座 3；CPU 功耗只统计识别出的 RAPL Package 域，并使用单调时钟按真实采样时长计算；若采样窗口跨越系统休眠、计数器回退、Package 读取失败或样本不完整，该轮显示 `--W`。NVIDIA GPU 功耗由 `nvidia-smi` 提供，只有所有 GPU 都有有效读数时才汇总。没有对应硬件、驱动或 RAPL 读取权限时，相应项显示 `--W`。鼠标悬停显示 Plasma 原生提示，左键循环切换显示模式，右键可打开设置。
 
@@ -71,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/galiandan/Mi_Power_Monitor_KDE/main
 - `backend/read-sensors.py` / `backend/read-sensors.sh`：按真实时间采样 RAPL Package 和 NVIDIA GPU；Shell 文件保留为启动兼容入口。
 - `backend/read-readings.py`：汇总一次 CPU、GPU 和整机功耗采样，让面板同步刷新。
 
-Go 通信依赖由 `backend/go.mod` 和 `backend/go.sum` 固定；扫码配置依赖由 `backend/requirements.txt` 固定。首次构建或首次扫码配置需要联网下载依赖。
+Go 通信依赖由 `backend/go.mod` 和 `backend/go.sum` 固定；扫码逻辑使用 Go 标准库，没有新增运行依赖。首次构建需要联网获取 Go 模块，扫码时直接连接小米云端；`backend/requirements.txt` 仅供可选旧版 Python 工具使用。
 
 ## 开发与打包小组件
 
@@ -103,6 +103,19 @@ GNU General Public License v3.0 only，详见 [LICENSE](LICENSE)。Go MIoT 通�
 
 KDE 使用 `~/.local/bin/mi-power-monitor-backend`，采集器优先执行同一版本目录内的后端。独立后端继续使用 `~/.local/bin/xiaomi-power`。升级 KDE 时仅移除指向 KDE 自己目录的旧别名，不覆盖独立后端。两者共享设备配置；另一套安装仍存在时，`--purge-config` 会保留共享 token 并提示。
 
-### 首次扫码安装进度
 
-安装器会分别提示创建 Python 环境、下载扫码依赖、下载 GitHub 扫码工具。扫码只安装 requests、pycryptodome、charset-normalizer、Pillow 和 colorama，不再下载可选 Python LAN 工具的 Git 依赖。创建环境最多 2 分钟，依赖安装最多 5 分钟；Git 下载每步最多 2 分钟。超时会退出并提示检查相应网络，之后可以重新运行安装命令。可选旧版 Python LAN/备份功能仍需手动安装完整 `requirements.txt`。
+### 内置二维码登录
+
+首次安装直接运行 Go 后端的 `--setup-cloud-qr`，默认询问服务器（回车选 cn；支持 de/us/ru/tw/sg/in/i2/all），随后自动打开浏览器。程序只在 `127.0.0.1` 的随机端口提供带随机路径的临时二维码页面；不用固定 31415 端口，也不会绑定代理或局域网地址。手机米家 App 扫码确认后，回终端选择插座；token 不输出，配置用 0600 权限原子保存。登录会话只保留在内存中，临时网页在登录结束后关闭。
+
+手动运行（KDE 安装将命令名换为 `mi-power-monitor-backend`）：
+
+```bash
+xiaomi-power --setup-cloud-qr
+xiaomi-power --setup-cloud-qr --region cn --no-browser
+xiaomi-power --validate-config
+```
+
+`--no-browser` 只输出本机网址，适合手动打开浏览器。二维码过期后重新运行即可；Ctrl+C 可取消。云端 IP 缺失时会询问局域网 IP。此登录接口属于小米云协议兼容实现，协议变动时可能需要更新。拥有超过单页上限且云端明确返回分页标志的家庭会提示手动配置，避免静默漏选。可选旧版 Python 工具保留，但安装器不再调用它登录；KDE 的 CPU/GPU 采样仍使用系统 Python。
+
+验证：Go 协议向量、模拟登录/设备查询、配置保护和本机 HTTP 页面测试通过；已实际取得小米二维码并主动取消，未完成真实账号授权和设备列表读取。
