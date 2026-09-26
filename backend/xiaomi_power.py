@@ -13,6 +13,7 @@ import math
 import os
 import re
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -45,7 +46,7 @@ def _localized(chinese: str, english: str, stream: Any | None = None) -> str:
 
 
 def _say(chinese: str, english: str, *, file: Any | None = None) -> None:
-    print(_localized(chinese, english, file), file=file)
+    print(_localized(chinese, english, file), file=file, flush=True)
 
 
 def _ask(chinese: str, english: str) -> str:
@@ -390,6 +391,27 @@ def setup_from_local_export(path: Path, source: Path) -> int:
         return 1
 
 
+def _run_qr_git(arguments: list[str], timeout: float = 120) -> None:
+    """Bound the entire Git process group, including HTTPS/credential helpers."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    process = subprocess.Popen(
+        ["git", *arguments], stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env=env, start_new_session=True,
+    )
+    try:
+        code = process.wait(timeout=timeout)
+    except BaseException:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+        raise
+    if code:
+        raise RuntimeError("QR Git download failed")
+
+
 def setup_from_qr_extractor(path: Path) -> int:
     """Use the QR-capable open-source extractor, redact token output, save match."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -401,11 +423,14 @@ def setup_from_qr_extractor(path: Path) -> int:
     try:
         import colorama  # noqa: F401
         import PIL  # noqa: F401
+        import requests  # noqa: F401
+        import Crypto  # noqa: F401
+        import charset_normalizer  # noqa: F401
     except ImportError:
         print(
             _localized(
-                "缺少二维码配置依赖，请运行：.venv/bin/python -m pip install colorama Pillow",
-                "QR setup dependencies are missing; run: .venv/bin/python -m pip install colorama Pillow",
+                "缺少二维码配置依赖，请运行：.venv/bin/python -m pip install requests pycryptodome charset-normalizer colorama Pillow",
+                "QR setup dependencies are missing; run: .venv/bin/python -m pip install requests pycryptodome charset-normalizer colorama Pillow",
             ),
             file=sys.stderr,
         )
@@ -435,30 +460,13 @@ def setup_from_qr_extractor(path: Path) -> int:
     try:
         with tempfile.TemporaryDirectory(prefix="xiaomi-power-qr-", dir=path.parent) as workdir:
             repo = Path(workdir) / "extractor"
-            clone = subprocess.run(
-                ["git", "clone", "--quiet", "--filter=blob:none", "--no-checkout", repo_url, str(repo)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            if clone.returncode:
-                raise RuntimeError("could not fetch the QR extractor")
-            fetch = subprocess.run(
-                ["git", "-C", str(repo), "fetch", "--quiet", "--depth", "1", "origin", pinned_commit],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            if fetch.returncode:
-                raise RuntimeError("could not fetch the pinned QR extractor revision")
-            checkout = subprocess.run(
-                ["git", "-C", str(repo), "checkout", "--quiet", "--detach", pinned_commit],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            if checkout.returncode:
-                raise RuntimeError("could not select the pinned QR extractor revision")
+            _say("正在从 GitHub 下载扫码工具（最多 2 分钟）……",
+                 "Downloading the QR helper from GitHub (up to 2 minutes)...")
+            _run_qr_git(["clone", "--quiet", "--filter=blob:none", "--no-checkout", repo_url, str(repo)])
+            _say("正在获取固定版本的扫码工具（最多 2 分钟）……",
+                 "Fetching the pinned QR helper revision (up to 2 minutes)...")
+            _run_qr_git(["-C", str(repo), "fetch", "--quiet", "--depth", "1", "origin", pinned_commit])
+            _run_qr_git(["-C", str(repo), "checkout", "--quiet", "--detach", pinned_commit], timeout=30)
 
             output_file = Path(workdir) / "devices.json"
             command = [
@@ -575,6 +583,14 @@ def setup_from_qr_extractor(path: Path) -> int:
             _say(f"已保存 {MODEL} 配置（{config['ip']}）；token 仅保存在本机，不会显示。",
                  f"Saved {MODEL} config for {config['ip']}; token was stored locally and not displayed.")
             return 0
+    except subprocess.TimeoutExpired:
+        _say("下载扫码工具超时，已停止下载。请检查 GitHub 网络或代理后重新运行安装命令。",
+             "QR helper download timed out and was stopped. Check GitHub connectivity/proxy and rerun the installer.", file=sys.stderr)
+        return 1
+    except RuntimeError:
+        _say("获取扫码工具失败，请检查 GitHub 网络、代理或固定版本是否可访问，然后重试。",
+             "Could not fetch the QR helper. Check GitHub connectivity, proxy and revision availability, then retry.", file=sys.stderr)
+        return 1
     except Exception as exc:
         _say(f"二维码配置失败（{exc.__class__.__name__}）。",
              f"QR token setup failed ({exc.__class__.__name__}).", file=sys.stderr)
