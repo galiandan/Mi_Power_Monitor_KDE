@@ -168,7 +168,9 @@ for domain in pathlib.Path('/sys/class/powercap').glob('*rapl:[0-9]*'):
         continue
 print(json.dumps(values))
 READER
-printf '%s\n#%s ALL=(root) NOPASSWD: NOSETENV: %s ""\nDefaults!%s !log_allowed, !pam_session, !pam_setcred\n' "$marker" "$target_uid" "$helper" "$helper" > "$tmp_grant"
+# Keep PAM credentials enabled: disabling both PAM options can leave sudo's
+# PAM handle null and make libpam log errors on every sensor read.
+printf '%s\n#%s ALL=(root) NOPASSWD: NOSETENV: %s ""\nDefaults!%s !log_allowed, !pam_session, pam_setcred\n' "$marker" "$target_uid" "$helper" "$helper" > "$tmp_grant"
 visudo -cf "$tmp_grant"
 chmod 0755 "$tmp_helper"
 chmod 0440 "$tmp_grant"

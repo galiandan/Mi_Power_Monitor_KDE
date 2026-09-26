@@ -106,3 +106,7 @@ The widget uses `mi-power-monitor-backend` and prefers its own bundled executabl
 The Go binary now handles QR login directly with `--setup-cloud-qr`. It asks for a region (default cn), opens a temporary browser page on 127.0.0.1 with a random port/path, and saves only the selected plug configuration with private permissions. No Python environment, pip or external login tool is downloaded. `--region cn --no-browser` prints the local URL without opening a browser. Use `--validate-config` to validate without a LAN request. The KDE command is `mi-power-monitor-backend`; its sensor scripts still use system Python.
 
 The Xiaomi cloud protocol may change. A live QR challenge was retrieved and cancelled; complete account authorization/device discovery remains unverified on a real account. Legacy Python tools remain optional.
+
+### Poll scheduling
+
+The panel waits one second after a completed collection before starting the next one. Commands from the same instance never overlap. With CPU enabled, the RAPL sample itself takes about one second, giving an approximately two-second refresh period. Polling continues after timeouts, malformed output, and display mode changes. The RAPL sudo rule keeps PAM credential initialization enabled to avoid null-handle errors on affected sudo/PAM combinations, while disabling command-success logging and PAM session creation for this helper only.

@@ -24,7 +24,7 @@ cd Mi_Power_Monitor_KDE
 
 面板显示整机、CPU 和 GPU 的整数瓦数，读取中或不可用时使用 `--W`。整机功耗来自米家智能插座 3；CPU 功耗只统计识别出的 RAPL Package 域，并使用单调时钟按真实采样时长计算；若采样窗口跨越系统休眠、计数器回退、Package 读取失败或样本不完整，该轮显示 `--W`。NVIDIA GPU 功耗由 `nvidia-smi` 提供，只有所有 GPU 都有有效读数时才汇总。没有对应硬件、驱动或 RAPL 读取权限时，相应项显示 `--W`。鼠标悬停显示 Plasma 原生提示，左键循环切换显示模式，右键可打开设置。
 
-若 CPU 一项显示 `--W` 且系统的 RAPL Package 计数器仅允许 root 读取，可运行 `./setup-rapl-access.sh`。系统会要求管理员授权，在 `/usr/local/libexec/mi-power-monitor/read-rapl` 安装 root 所有的固定只读程序，并在 `/etc/sudoers.d/mi-power-monitor-rapl-<UID>` 仅授权当前账户无参数调用。它不修改 sysfs 权限、不启动后台服务，支持不同用户分别安装和卸载授权。程序使用 Python 隔离模式，只返回 Package 能量和范围；成功查询日志与 PAM 会话创建仅对该命令停用，避免每秒刷日志。拒绝访问仍保留日志。旧权限规则仅在快照完整且权限未被管理员改动时迁移；否则保留现场并提示处理。
+若 CPU 一项显示 `--W` 且系统的 RAPL Package 计数器仅允许 root 读取，可运行 `./setup-rapl-access.sh`。系统会要求管理员授权，在 `/usr/local/libexec/mi-power-monitor/read-rapl` 安装 root 所有的固定只读程序，并在 `/etc/sudoers.d/mi-power-monitor-rapl-<UID>` 仅授权当前账户无参数调用。它不修改 sysfs 权限、不启动后台服务，支持不同用户分别安装和卸载授权。程序使用 Python 隔离模式，只返回 Package 能量和范围；成功查询日志与 PAM 会话创建仅对该命令停用，避免每秒刷日志。保留 PAM 凭据初始化，避免部分 sudo/PAM 组合产生空 handle 错误。拒绝访问仍保留日志。旧权限规则仅在快照完整且权限未被管理员改动时迁移；否则保留现场并提示处理。
 
 默认 Full 模式显示 `⚡ 83W · CPU 21W · GPU 37W`；Compact 模式省去 CPU/GPU 标签；Total only 只显示整机功耗。可在组件设置里选择模式并关闭 CPU 或 GPU；关闭后停用对应采集，Total only 停用两者，tooltip 中未采集项显示 `--W`。检测到 NVIDIA 显示设备处于非 active 状态时跳过 GPU 查询，避免主动唤醒休眠显卡；runtime 状态检查与查询之间仍存在硬件状态变化的时间窗口。
 
@@ -119,3 +119,7 @@ xiaomi-power --validate-config
 `--no-browser` 只输出本机网址，适合手动打开浏览器。二维码过期后重新运行即可；Ctrl+C 可取消。云端 IP 缺失时会询问局域网 IP。此登录接口属于小米云协议兼容实现，协议变动时可能需要更新。拥有超过单页上限且云端明确返回分页标志的家庭会提示手动配置，避免静默漏选。可选旧版 Python 工具保留，但安装器不再调用它登录；KDE 的 CPU/GPU 采样仍使用系统 Python。
 
 验证：Go 协议向量、模拟登录/设备查询、配置保护和本机 HTTP 页面测试通过；已实际取得小米二维码并主动取消，未完成真实账号授权和设备列表读取。
+
+### 采集调度
+
+面板在一轮采集结束后等待 1 秒再开始下一轮，同一实例不重叠启动命令。开启 CPU 时，RAPL 采样本身约需 1 秒，因此正常刷新周期约为 2 秒；关闭 CPU 后周期通常更短。超时、无效输出以及显示模式切换后都会继续调度。

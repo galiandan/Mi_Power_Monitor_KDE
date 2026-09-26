@@ -93,13 +93,43 @@ PlasmoidItem {
         plasmoid.configuration.displayMode = (displayMode + 1) % 3
     }
 
+    // Schedule only after the previous command has finished. RAPL sampling
+    // itself takes one second, so a repeating one-second DataSource overlaps.
+    property string activeReadingsCommand: ""
+
+    function startReadings() {
+        if (activeReadingsCommand !== "")
+            return
+        activeReadingsCommand = readingsCommand
+        executable.connectSource(activeReadingsCommand)
+    }
+
+    Timer {
+        id: nextReading
+        interval: 1000
+        repeat: false
+        onTriggered: root.startReadings()
+    }
+
+    Component.onCompleted: startReadings()
+    onReadingsCommandChanged: {
+        if (activeReadingsCommand === "")
+            nextReading.restart()
+    }
+
     Plasma5Support.DataSource {
         id: executable
         engine: "executable"
-        interval: 1000
-        connectedSources: [root.readingsCommand]
+        interval: 0
 
         onNewData: (sourceName, data) => {
+            if (sourceName !== root.activeReadingsCommand)
+                return
+            executable.disconnectSource(sourceName)
+            root.activeReadingsCommand = ""
+            // Restart before parsing: malformed output, busy and old snapshots
+            // must not stop future polling. Apply mode changes next cycle.
+            nextReading.restart()
             if (sourceName !== root.readingsCommand)
                 return
 
