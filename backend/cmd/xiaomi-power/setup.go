@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode"
@@ -43,9 +44,57 @@ func localText(zh, en string) string {
 }
 func setupMessage(zh, en string) { fmt.Println(localText(zh, en)) }
 
+// The browser receives lifecycle labels only, never cloud session data.
+type qrPageState struct {
+	mu        sync.RWMutex
+	stage     string
+	delivered chan struct{}
+	once      sync.Once
+}
+
+func newQRPageState() *qrPageState {
+	return &qrPageState{stage: "waiting", delivered: make(chan struct{})}
+}
+func (s *qrPageState) set(stage string) { s.mu.Lock(); s.stage = stage; s.mu.Unlock() }
+func (s *qrPageState) snapshot() map[string]any {
+	s.mu.RLock()
+	stage := s.stage
+	s.mu.RUnlock()
+	title, detail := localText("米家扫码登录", "Mi Home QR sign-in"), localText("请用手机米家 App 扫码并确认。", "Scan and approve with Mi Home on your phone.")
+	switch stage {
+	case "authenticated":
+		title = localText("登录成功", "Signed in successfully")
+		detail = localText("正在读取插座列表。请按 Alt+Tab 返回安装终端，继续选择插座。", "Loading plugs. Press Alt+Tab to return to the installation terminal and select your plug.")
+	case "done":
+		title = localText("配置完成", "Configuration complete")
+		detail = localText("插座 token 已安全保存到本机。请按 Alt+Tab 返回终端查看后续安装结果，可以关闭此页面。", "The plug token was saved privately. Press Alt+Tab to return to the terminal for the remaining installation steps. You may close this page.")
+	case "failed":
+		title = localText("登录未完成", "Sign-in not completed")
+		detail = localText("二维码可能已过期，或登录已取消。请返回终端查看原因并重试。", "The QR code may have expired or sign-in was cancelled. Return to the terminal for details and retry.")
+	case "config-failed":
+		title = localText("已登录，配置未完成", "Signed in; configuration incomplete")
+		detail = localText("账号登录已成功，但设备读取或保存未完成。请返回终端查看原因。", "Account sign-in succeeded, but device discovery or saving did not finish. Return to the terminal for details.")
+	}
+	return map[string]any{"stage": stage, "title": title, "detail": detail, "final": stage == "done" || stage == "failed" || stage == "config-failed"}
+}
+func (s *qrPageState) waitForDisplay(ctx context.Context) {
+	// Bound shutdown even if the browser was closed or never opened.
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-s.delivered:
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+}
+
 // The only HTTP listener is loopback, with an unguessable path and no writes.
 // No cloud session credentials or device tokens are sent to the browser.
-func serveQR(ctx context.Context, picture []byte) (string, func(), error) {
+func serveQR(ctx context.Context, picture []byte, states ...*qrPageState) (string, func(), error) {
+	state := newQRPageState()
+	if len(states) > 0 {
+		state = states[0]
+	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(picture))
 	if err != nil || cfg.Width < 1 || cfg.Height < 1 || cfg.Width > 2048 || cfg.Height > 2048 {
 		return "", nil, errors.New("invalid QR image")
@@ -72,18 +121,53 @@ func serveQR(ctx context.Context, picture []byte) (string, func(), error) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
-		if r.Host != host || r.Method != "GET" || (r.URL.Path != path && r.URL.Path != path+"/qr") {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'nonce-"+hex.EncodeToString(secret)+"'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+		if r.Host != host || r.Method != "GET" || (r.URL.Path != path && r.URL.Path != path+"/qr" && r.URL.Path != path+"/status" && r.URL.Path != path+"/result") {
 			http.NotFound(w, r)
 			return
 		}
+		status := state.snapshot()
+		if r.URL.Path == path+"/status" {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(status); err == nil && status["final"] == true {
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+				state.once.Do(func() { close(state.delivered) })
+			}
+			return
+		}
 		if r.URL.Path == path+"/qr" {
+			if status["stage"] != "waiting" {
+				w.WriteHeader(http.StatusGone)
+				return
+			}
 			w.Header().Set("Content-Type", media)
 			_, _ = w.Write(picture)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Mi Power Monitor</title><body style="font-family:system-ui;text-align:center"><h1>%s</h1><p>%s</p><img width="320" height="320" alt="QR code" src="%s/qr"><p>%s</p></body></html>`, localText("米家扫码登录", "Mi Home QR sign-in"), localText("请使用手机米家 App 扫码并确认登录。", "Scan with Mi Home on your phone and approve sign-in."), path, localText("完成后返回终端选择插座。页面到期后请重新运行安装命令。", "Return to the terminal to select a plug. Rerun setup if this page expires."))
+		fmt.Fprintf(w, `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Mi Power Monitor</title><body style="font-family:system-ui;text-align:center;color-scheme:light dark;padding:2rem"><div id="mark" hidden style="font-size:3rem" aria-hidden="true">✓</div><h1 id="title">%s</h1><p id="detail" role="status" aria-live="polite">%s</p><img id="qr" width="320" height="320" style="max-width:80vw;height:auto" alt="QR code" src="%s/qr"><noscript>%s</noscript><script nonce="%s">
+const base=%q;
+async function update(){
+ try {
+  const response=await fetch(base+'/status',{cache:'no-store'});
+  if(!response.ok) throw new Error('unavailable');
+  const s=await response.json();
+  document.getElementById('title').textContent=s.title;
+  document.getElementById('detail').textContent=s.detail;
+  document.title=s.title+' — Mi Power Monitor';
+  document.getElementById('qr').hidden=s.stage!=='waiting';
+  document.getElementById('mark').hidden=!['authenticated','done'].includes(s.stage);
+  if(s.stage!=='waiting') history.replaceState(null,'',base+'/result');
+  if(!s.final) setTimeout(update,400);
+ } catch(e) {
+  document.getElementById('qr').hidden=true;
+  document.getElementById('detail').textContent=%q;
+ }
+}
+update();
+</script></body></html>`, localText("米家扫码登录", "Mi Home QR sign-in"), localText("请用手机米家 App 扫码并确认。", "Scan and approve with Mi Home on your phone."), path, localText("请启用 JavaScript 查看登录结果，或返回终端查看进度。", "Enable JavaScript for sign-in status, or return to the terminal."), hex.EncodeToString(secret), path, localText("本机登录页面已结束，请返回终端确认结果；这不代表登录失败。", "The local sign-in page has ended. Return to the terminal to confirm the result; this does not mean sign-in failed."))
 	})
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 8192}
 	done := make(chan struct{})
@@ -256,7 +340,7 @@ func selectPlug(ctx context.Context, scanner *bufio.Scanner, devices []cloudDevi
 	return config{Model: model, IP: ip, Token: d.Token, Timeout: 5}, nil
 }
 
-func setupCloudQR(region string, noBrowser bool) error {
+func setupCloudQR(region string, noBrowser bool) (resultErr error) {
 	if os.Geteuid() == 0 {
 		return errors.New("run QR setup as the desktop user, not root")
 	}
@@ -288,11 +372,23 @@ func setupCloudQR(region string, noBrowser bool) error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", localText("申请二维码失败，请检查小米网络连接", "QR request failed; check Xiaomi connectivity"), err)
 	}
-	address, closePage, err := serveQR(ctx, picture)
+	pageState := newQRPageState()
+	authenticated := false
+	address, closePage, err := serveQR(ctx, picture, pageState)
 	if err != nil {
 		return err
 	}
-	defer closePage()
+	defer func() {
+		if resultErr != nil {
+			if authenticated {
+				pageState.set("config-failed")
+			} else {
+				pageState.set("failed")
+			}
+		}
+		pageState.waitForDisplay(ctx)
+		closePage()
+	}()
 	setupMessage("请在本机浏览器打开下方网址，用手机米家 App 扫码并确认。", "Open this local URL, then scan and approve with Mi Home on your phone.")
 	fmt.Println(address)
 	if !noBrowser {
@@ -301,7 +397,8 @@ func setupCloudQR(region string, noBrowser bool) error {
 	if err = client.awaitLogin(ctx, challenge); err != nil {
 		return fmt.Errorf("%s: %w", localText("扫码登录失败或已过期，请重试", "QR login failed or expired; please retry"), err)
 	}
-	closePage()
+	authenticated = true
+	pageState.set("authenticated")
 	setupMessage("登录成功，正在读取插座列表……", "Signed in; loading plugs...")
 	regions := []string{region}
 	if region == "all" {
@@ -327,6 +424,7 @@ func setupCloudQR(region string, noBrowser bool) error {
 	if err = saveSetupConfig(configPath(), cfg); err != nil {
 		return err
 	}
+	pageState.set("done")
 	setupMessage("插座配置已安全保存；token 仅保存在本机，不会显示。", "Plug configuration saved privately; the token is stored locally and never displayed.")
 	return nil
 }

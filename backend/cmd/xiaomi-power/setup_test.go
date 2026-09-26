@@ -236,3 +236,66 @@ func TestCloudCancellationAndNoCredentialErrors(t *testing.T) {
 		t.Fatal("bad cancellation error")
 	}
 }
+
+func TestQRPageTransitionsAndFinalDelivery(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	state := newQRPageState()
+	address, closePage, err := serveQR(ctx, testQR(t), state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closePage()
+	for _, stage := range []string{"waiting", "authenticated", "config-failed", "done"} {
+		state.set(stage)
+		response, err := http.Get(address + "/status")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result map[string]any
+		err = json.NewDecoder(response.Body).Decode(&result)
+		response.Body.Close()
+		if err != nil || result["stage"] != stage {
+			t.Fatal("wrong browser stage", err)
+		}
+		if len(result) != 4 {
+			t.Fatal("unexpected browser data; status must contain labels only")
+		}
+		if result["final"] != (stage == "done" || stage == "config-failed") {
+			t.Fatal("incorrect completion state")
+		}
+	}
+	start := time.Now()
+	state.waitForDisplay(ctx)
+	if time.Since(start) > time.Second {
+		t.Fatal("final status was delivered but shutdown still waited")
+	}
+	response, err := http.Get(address + "/qr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusGone {
+		t.Fatal("old QR still served after login")
+	}
+	response, err = http.Get(address + "/result")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if response.StatusCode != 200 || !bytes.Contains(data, []byte("history.replaceState")) || !strings.Contains(response.Header.Get("Content-Security-Policy"), "script-src 'nonce-") {
+		t.Fatal("missing result navigation or script CSP")
+	}
+}
+
+func TestQRPageWaitStopsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	state := newQRPageState()
+	start := time.Now()
+	state.waitForDisplay(ctx)
+	if time.Since(start) > time.Second {
+		t.Fatal("cancelled setup delayed exit")
+	}
+}
